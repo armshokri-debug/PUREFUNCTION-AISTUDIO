@@ -199,8 +199,25 @@ export function useProgramTemplates() {
       return;
     }
 
+    if (supabase && sessionStatus === 'loading') {
+      inFlightRef.current = false;
+      setLoading(true);
+      return;
+    }
+    if (supabase && sessionStatus !== 'ready' && sessionStatus !== 'local') {
+      if (mountedRef.current && reqId === requestIdRef.current) {
+        setTemplates([]);
+        setOwnerIds({});
+        setError(null);
+        setReady(false);
+        inFlightRef.current = false;
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
-      const { data, error: loadError } = await supabase
+      const { data, error: loadError } = await supabase!
         .from('program_templates')
         .select('owner_id, data')
         .order('created_at', { ascending: false });
@@ -234,7 +251,7 @@ export function useProgramTemplates() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [profile?.id, sessionStatus]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -258,23 +275,31 @@ export function useProgramTemplates() {
     mutatingRef.current = true;
     try {
       let savedOwnerId = '';
+      let storedTemplate = cloneTemplate(template);
       if (supabase) {
         const { data: insertedRow, error: writeError } = await supabase
           .from('program_templates')
-          .insert({ id: template.id, data: template })
+          .insert({ id: template.id, data: storedTemplate })
           .select('owner_id, data')
           .single();
-        if (writeError) { setError(writeError.message); throw writeError; }
-        if (isPlainObject(insertedRow) && typeof insertedRow.owner_id === 'string') {
-          savedOwnerId = insertedRow.owner_id.trim();
+        if (writeError) throw writeError;
+        if (isPlainObject(insertedRow)) {
+          if (typeof insertedRow.owner_id === 'string') {
+            savedOwnerId = insertedRow.owner_id.trim();
+          }
+          if (isValidProgramTemplateObject(insertedRow.data, template.id)) {
+            storedTemplate = cloneTemplate(insertedRow.data);
+          }
         }
       } else {
-        const next = [template, ...templates];
+        const next = [storedTemplate, ...templates];
         localStorage.setItem(DEMO_KEY, JSON.stringify(next));
       }
-      setTemplates((prev) => [template, ...prev]);
-      if (savedOwnerId) {
-        setOwnerIds((prev) => ({ ...prev, [template.id]: savedOwnerId }));
+      if (mountedRef.current) {
+        setTemplates((prev) => [storedTemplate, ...prev]);
+        if (savedOwnerId) {
+          setOwnerIds((prev) => ({ ...prev, [storedTemplate.id]: savedOwnerId }));
+        }
       }
     } finally {
       mutatingRef.current = false;
@@ -360,11 +385,11 @@ export function useProgramTemplates() {
     try {
       if (supabase) {
         const { error: writeError } = await supabase.from('program_templates').delete().eq('id', id);
-        if (writeError) { setError(writeError.message); throw writeError; }
+        if (writeError) throw writeError;
       } else {
         localStorage.setItem(DEMO_KEY, JSON.stringify(templates.filter((t) => t.id !== id)));
       }
-      setTemplates((prev) => prev.filter((t) => t.id !== id));
+      if (mountedRef.current) setTemplates((prev) => prev.filter((t) => t.id !== id));
       setOwnerIds((prev) => {
         if (!(id in prev)) return prev;
         const next = { ...prev };

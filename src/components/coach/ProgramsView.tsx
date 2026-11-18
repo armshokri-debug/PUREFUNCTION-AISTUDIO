@@ -36,7 +36,7 @@ export const ProgramsView: React.FC<{
         ))}
       </select>
     </div>
-    <ProgramTemplates key={client.id} clients={clients} client={client} onApply={onApplyTemplate} />
+    <ProgramTemplates key={client.id} clients={clients} client={client} onApply={onApplyTemplate} onFlush={onFlush} />
     <div className="pf-embed pf-programs">
       <WorkoutBuilderView clients={[client]} client={client} onSelectClientId={() => {}} onUpdateClient={onUpdateClient} syncState={syncState} onFlush={onFlush} />
     </div>

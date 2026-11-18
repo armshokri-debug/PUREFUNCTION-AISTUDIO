@@ -90,8 +90,36 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
   const timer = useRef<number | null>(null);
   const flushing = useRef(false);
   const again = useRef(false);
+  const inflightFlush = useRef<Promise<boolean> | null>(null);
+  const flushRef = useRef<() => Promise<boolean>>(async () => false);
 
   const isCoach = profile?.role === 'coach';
+
+  const hasPendingChanges = useCallback(
+    (list: ClientProfile[]) => {
+      if (isCoach) {
+        const liveClientIds = new Set(list.map((c) => c.id));
+        for (const id of pushedClients.current.keys()) {
+          if (!liveClientIds.has(id)) return true;
+        }
+      }
+      const liveWorkoutIds = new Set<string>();
+      for (const c of list) {
+        if (pushedClients.current.get(c.id) !== stableStringify(clientRow(c))) return true;
+        for (const w of c.workouts ?? []) {
+          liveWorkoutIds.add(w.id);
+          if (pushedWorkouts.current.get(w.id) !== stableStringify(workoutRow(c.id, w))) return true;
+        }
+      }
+      if (isCoach) {
+        for (const id of pushedWorkouts.current.keys()) {
+          if (!liveWorkoutIds.has(id)) return true;
+        }
+      }
+      return false;
+    },
+    [isCoach]
+  );
 
   /* ---------------- initial load ---------------- */
   const loadedFor = useRef<string | null>(null);
@@ -112,6 +140,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
       }
       const byClient = new Map<string, Workout[]>();
       pushedWorkouts.current.clear();
+      workoutVersions.current.clear();
       for (const r of (w.data ?? []) as WorkoutRow[]) {
         if (r.updated_at) workoutVersions.current.set(r.id, r.updated_at);
         const wo = { ...r.data, id: r.id, date: r.date };
@@ -119,6 +148,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
         byClient.set(r.client_id, [...(byClient.get(r.client_id) ?? []), wo]);
       }
       pushedClients.current.clear();
+      clientVersions.current.clear();
       const list = ((c.data ?? []) as ClientRow[])
         .map((r) => {
           if (r.updated_at) clientVersions.current.set(r.id, r.updated_at);
@@ -127,9 +157,11 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
           return { ...profileDoc, workouts: sortWorkouts(byClient.get(r.id) ?? []) };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
+      blocked.current = false;
       current.current = list;
       setState(list);
       setLoadError(null);
+      setSync('saved');
       loadedFor.current = profile.id;
       setLoaded(true);
     })();
@@ -140,153 +172,193 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
 
   /* ---------------- writes ---------------- */
   const flush = useCallback(async (): Promise<boolean> => {
+    if (timer.current) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
     if (!supabase || !profile || !mounted.current || blocked.current || loadedFor.current !== profile.id) return false;
-    if (flushing.current) {
+    if (inflightFlush.current) {
       again.current = true;
-      return false;
+      return inflightFlush.current;
     }
     flushing.current = true;
-    setSync('saving');
-    let failed = false;
-    let conflict = false;
-    try {
-      const list = current.current;
-      const liveClientIds = new Set(list.map((c) => c.id));
-      const liveWorkouts = new Map<string, { json: string; row: WorkoutRow }>();
-      for (const c of list) {
-        for (const w of c.workouts ?? []) {
-          const row = workoutRow(c.id, w);
-          liveWorkouts.set(w.id, { json: stableStringify(row), row });
-        }
-      }
+    const run = (async (): Promise<boolean> => {
+      setSync('saving');
+      let failed = false;
+      let conflict = false;
+      try {
+        do {
+          again.current = false;
+          if (timer.current) {
+            window.clearTimeout(timer.current);
+            timer.current = null;
+          }
+          const list = current.current;
+          const liveClientIds = new Set(list.map((c) => c.id));
+          const liveWorkouts = new Map<string, { json: string; row: WorkoutRow }>();
+          for (const c of list) {
+            for (const w of c.workouts ?? []) {
+              const row = workoutRow(c.id, w);
+              liveWorkouts.set(w.id, { json: stableStringify(row), row });
+            }
+          }
 
-      // 1) deletions first (frees the one-workout-per-day slot for replacements)
-      if (isCoach) {
-        const goneWorkouts = [...pushedWorkouts.current.keys()].filter((id) => !liveWorkouts.has(id));
-        for (const id of goneWorkouts) {
-          const version = workoutVersions.current.get(id);
-          if (!version) throw new Error('Missing workout version');
-          const { data, error } = await supabase.from('workouts').delete().eq('id', id).eq('updated_at', version).select('id');
-          if (error) throw error;
-          if (!data?.length) throw { code: '40001', message: 'Workout changed before deletion' };
-          pushedWorkouts.current.delete(id); workoutVersions.current.delete(id);
-        }
-        const goneClients = [...pushedClients.current.keys()].filter((id) => !liveClientIds.has(id));
-        for (const id of goneClients) {
-          const version = clientVersions.current.get(id);
-          if (!version) throw new Error('Missing profile version');
-          const { data, error } = await supabase.from('clients').delete().eq('id', id).eq('updated_at', version).select('id');
-          if (error) throw error;
-          if (!data?.length) throw { code: '40001', message: 'Profile changed before deletion' };
-          pushedClients.current.delete(id); clientVersions.current.delete(id);
-        }
-      }
+          // 1) deletions first (frees the one-workout-per-day slot for replacements)
+          if (isCoach) {
+            const goneWorkouts = [...pushedWorkouts.current.keys()].filter((id) => !liveWorkouts.has(id));
+            for (const id of goneWorkouts) {
+              const version = workoutVersions.current.get(id);
+              if (!version) throw new Error('Missing workout version');
+              const { data, error } = await supabase!.from('workouts').delete().eq('id', id).eq('updated_at', version).select('id');
+              if (error) throw error;
+              if (!data?.length) throw { code: '40001', message: 'Workout changed before deletion' };
+              pushedWorkouts.current.delete(id); workoutVersions.current.delete(id);
+            }
+            const goneClients = [...pushedClients.current.keys()].filter((id) => !liveClientIds.has(id));
+            for (const id of goneClients) {
+              const version = clientVersions.current.get(id);
+              if (!version) throw new Error('Missing profile version');
+              const { data, error } = await supabase!.from('clients').delete().eq('id', id).eq('updated_at', version).select('id');
+              if (error) throw error;
+              if (!data?.length) throw { code: '40001', message: 'Profile changed before deletion' };
+              pushedClients.current.delete(id); clientVersions.current.delete(id);
+            }
+          }
 
-      // 2) client profiles that changed (before their workouts: foreign key)
-      const changedClients = list
-        .map((c) => {
-          const row = clientRow(c);
-          return { row, json: stableStringify(row) };
-        })
-        .filter((x) => pushedClients.current.get(x.row.id) !== x.json);
-      for (const x of changedClients) {
-        const version = clientVersions.current.get(x.row.id);
-        if (!isCoach && x.row.id !== profile.clientId) throw new Error('Own profile only');
-        if (pushedClients.current.has(x.row.id)) {
-          if (!version) throw new Error('Missing profile version. Reload before saving.');
-          const { data, error } = await supabase.from('clients')
-            .update(isCoach ? x.row : { data: x.row.data })
-            .eq('id', x.row.id).eq('updated_at', version).select('id,updated_at');
-          if (error) throw error;
-          if (!data?.length) throw { code: '40001', message: 'Profile changed on another device. Reload before saving.' };
-          clientVersions.current.set(x.row.id, data[0].updated_at);
-        } else {
-          if (!isCoach) throw new Error('Clients cannot create profiles');
-          const { data, error } = await supabase.from('clients').insert(x.row).select('id,updated_at');
-          if (error) throw error;
-          if (!data?.length) throw new Error('Profile was not saved');
-          clientVersions.current.set(x.row.id, data[0].updated_at);
-        }
-        pushedClients.current.set(x.row.id, x.json);
-      }
+          // 2) client profiles that changed (before their workouts: foreign key)
+          const changedClients = list
+            .map((c) => {
+              const row = clientRow(c);
+              return { row, json: stableStringify(row) };
+            })
+            .filter((x) => pushedClients.current.get(x.row.id) !== x.json);
+          for (const x of changedClients) {
+            const version = clientVersions.current.get(x.row.id);
+            if (!isCoach && x.row.id !== profile.clientId) throw new Error('Own profile only');
+            if (pushedClients.current.has(x.row.id)) {
+              if (!version) throw new Error('Missing profile version. Reload before saving.');
+              const { data, error } = await supabase!.from('clients')
+                .update(isCoach ? x.row : { data: x.row.data })
+                .eq('id', x.row.id).eq('updated_at', version).select('id,updated_at');
+              if (error) throw error;
+              if (!data?.length) throw { code: '40001', message: 'Profile changed on another device. Reload before saving.' };
+              clientVersions.current.set(x.row.id, data[0].updated_at);
+            } else {
+              if (!isCoach) throw new Error('Clients cannot create profiles');
+              const { data, error } = await supabase!.from('clients').insert(x.row).select('id,updated_at');
+              if (error) throw error;
+              if (!data?.length) throw new Error('Profile was not saved');
+              clientVersions.current.set(x.row.id, data[0].updated_at);
+            }
+            pushedClients.current.set(x.row.id, x.json);
+          }
 
-      const changedWorkouts = [...liveWorkouts.values()].filter((x) => pushedWorkouts.current.get(x.row.id) !== x.json);
-      for (const x of changedWorkouts) {
-        const version = workoutVersions.current.get(x.row.id);
-        if (!isCoach) {
-          if (!version || x.row.client_id !== profile.clientId) throw new Error('Existing own workouts only');
-          const { data, error } = await supabase.rpc('save_workout_results_secure', {
-            p_workout_id: x.row.id, p_client_id: x.row.client_id,
-            p_expected_version: version, p_results: workoutResults(x.row.data)
-          });
-          if (error) throw error;
-          if (!data?.[0]?.updated_version) throw new Error('Workout result was not saved');
-          workoutVersions.current.set(x.row.id, data[0].updated_version);
-        } else if (pushedWorkouts.current.has(x.row.id)) {
-          if (!version) throw new Error('Missing workout version. Reload before saving.');
-          const { data, error } = await supabase.from('workouts').update(x.row)
-            .eq('id', x.row.id).eq('updated_at', version).select('id,updated_at');
-          if (error) throw error;
-          if (!data?.length) throw { code: '40001', message: 'Workout changed on another device. Reload before saving.' };
-          workoutVersions.current.set(x.row.id, data[0].updated_at);
-        } else {
-          const { data, error } = await supabase.from('workouts').insert(x.row).select('id,updated_at');
-          if (error) throw error;
-          if (!data?.length) throw new Error('Workout was not saved');
-          workoutVersions.current.set(x.row.id, data[0].updated_at);
-        }
-        pushedWorkouts.current.set(x.row.id, x.json);
+          const changedWorkouts = [...liveWorkouts.values()].filter((x) => pushedWorkouts.current.get(x.row.id) !== x.json);
+          for (const x of changedWorkouts) {
+            const version = workoutVersions.current.get(x.row.id);
+            if (!isCoach) {
+              if (!version || x.row.client_id !== profile.clientId) throw new Error('Existing own workouts only');
+              const { data, error } = await supabase!.rpc('save_workout_results_secure', {
+                p_workout_id: x.row.id, p_client_id: x.row.client_id,
+                p_expected_version: version, p_results: workoutResults(x.row.data)
+              });
+              if (error) throw error;
+              if (!data?.[0]?.updated_version) throw new Error('Workout result was not saved');
+              workoutVersions.current.set(x.row.id, data[0].updated_version);
+            } else if (pushedWorkouts.current.has(x.row.id)) {
+              if (!version) throw new Error('Missing workout version. Reload before saving.');
+              const { data, error } = await supabase!.from('workouts').update(x.row)
+                .eq('id', x.row.id).eq('updated_at', version).select('id,updated_at');
+              if (error) throw error;
+              if (!data?.length) throw { code: '40001', message: 'Workout changed on another device. Reload before saving.' };
+              workoutVersions.current.set(x.row.id, data[0].updated_at);
+            } else {
+              const { data, error } = await supabase!.from('workouts').insert(x.row).select('id,updated_at');
+              if (error) throw error;
+              if (!data?.length) throw new Error('Workout was not saved');
+              workoutVersions.current.set(x.row.id, data[0].updated_at);
+            }
+            pushedWorkouts.current.set(x.row.id, x.json);
+          }
+        } while (again.current && mounted.current && !blocked.current);
+      } catch (e) {
+        failed = true;
+        conflict = ['40001', '42501', '23505', '23503'].includes((e as { code?: string }).code ?? '');
+        if (conflict) blocked.current = true;
+        if (conflict) setLoadError('Your changes could not be saved safely. Reload to fetch the latest data before editing again.');
+      } finally {
+        flushing.current = false;
+        inflightFlush.current = null;
       }
-    } catch (e) {
-      failed = true;
-      conflict = ['40001', '42501', '23505', '23503'].includes((e as { code?: string }).code ?? '');
-      if (conflict) blocked.current = true;
-      if (conflict) setLoadError('Your changes could not be saved safely. Reload to fetch the latest data before editing again.');
-    } finally {
-      flushing.current = false;
-    }
-    if (again.current && !conflict) {
+      if (!mounted.current) return false;
       again.current = false;
-      void flush();
-      return false;
-    }
-    if (!mounted.current) return false;
-    again.current = false;
-    if (failed) {
-      setSync(navigator.onLine === false ? 'offline' : 'error');
-      // try again shortly (network blips, token refresh)
-      if (!conflict) timer.current = window.setTimeout(() => void flush(), 5000);
-    } else {
-      setSync('saved');
-    }
-    return !failed;
-  }, [isCoach, profile]);
+      if (failed) {
+        setSync(navigator.onLine === false ? 'offline' : 'error');
+        // try again shortly (network blips, token refresh)
+        if (!conflict && !timer.current) timer.current = window.setTimeout(() => void flushRef.current(), 5000);
+        return false;
+      }
+      const pending = hasPendingChanges(current.current) || timer.current !== null;
+      setSync(pending ? 'saving' : 'saved');
+      if (pending && !timer.current) {
+        timer.current = window.setTimeout(() => void flushRef.current(), 600);
+      }
+      return !pending;
+    })();
+    inflightFlush.current = run;
+    return run;
+  }, [hasPendingChanges, isCoach, profile]);
+
+  useEffect(() => {
+    flushRef.current = flush;
+  }, [flush]);
 
   const setClients = useCallback(
     (update: (prev: ClientProfile[]) => ClientProfile[]) => {
       const next = update(current.current);
       current.current = next;
       setState(next);
+      if (blocked.current) {
+        setSync('error');
+        return;
+      }
       setSync('saving');
       if (timer.current) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => void flush(), 600);
+      timer.current = window.setTimeout(() => void flushRef.current(), 600);
     },
-    [flush]
+    []
   );
 
-  // save before the tab closes
+  // save before the tab closes, and warn if unsaved edits haven't synced yet
   useEffect(() => {
     const onHide = () => {
       if (document.visibilityState === 'hidden') void flush();
     };
+    const onPageHide = () => {
+      void flush();
+    };
     const onOnline = () => void flush();
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (
+        !blocked.current &&
+        loadedFor.current === profile?.id &&
+        (hasPendingChanges(current.current) || inflightFlush.current !== null || timer.current !== null)
+      ) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
     document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onPageHide);
     window.addEventListener('online', onOnline);
+    window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('beforeunload', onBeforeUnload);
     };
-  }, [flush]);
+  }, [flush, hasPendingChanges, profile?.id]);
 
   /* ---------------- live changes from other devices ---------------- */
   useEffect(() => {

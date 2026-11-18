@@ -25,6 +25,7 @@ export const ClientInviteModal: React.FC<{
   const [mailing, setMailing] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [reminders, setReminders] = useState(client.emailReminders !== false);
 
+  const savedEmail = (client.email ?? '').trim().toLowerCase();
   const cleanEmail = email.trim().toLowerCase();
   const link = inviteLink(cleanEmail);
   const message = `Hi ${name.split(' ')[0] || ''}! I've set up your training in Pure Function.\n1. Open: ${link}\n2. Tap "Set up your account" and choose a password (your email ${cleanEmail} is already filled in).\nAfter that, sign in any time as a client to see your workouts.`;
@@ -32,7 +33,7 @@ export const ClientInviteModal: React.FC<{
   const save = () => {
     if (!name.trim()) return setError('Enter a name.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Enter a valid email.');
-    if (clients.some((c) => c.id !== client.id && (c.email ?? '').toLowerCase() === cleanEmail)) {
+    if (clients.some((c) => c.id !== client.id && (c.email ?? '').trim().toLowerCase() === cleanEmail)) {
       return setError('Another client already uses this email.');
     }
     onSave({ ...client, name: name.trim(), email: cleanEmail, emailReminders: reminders });
@@ -40,7 +41,9 @@ export const ClientInviteModal: React.FC<{
   };
 
   const emailInvite = async () => {
-    if (cleanEmail !== client.email) return setError('Save the new email first, then send.');
+    if (mailing === 'sending') return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Enter a valid email.');
+    if (cleanEmail !== savedEmail) return setError('Save the new email first, then send.');
     setError(null);
     setMailing('sending');
     if (onEnsureSaved) {
@@ -99,8 +102,17 @@ export const ClientInviteModal: React.FC<{
         <label className="block text-xs font-medium text-gray-600 mb-1.5">Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={`${field} mb-3`} />
         <label className="block text-xs font-medium text-gray-600 mb-1.5">Email (they sign in with this)</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
-        {joined && cleanEmail !== client.email && (
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (mailing === 'sent') setMailing('idle');
+            if (error) setError(null);
+          }}
+          className={field}
+        />
+        {joined && cleanEmail !== savedEmail && (
           <p className="text-xs text-[#92400E] mt-1.5">
             They already have an account with the old email; changing it here doesn’t change their login.
           </p>

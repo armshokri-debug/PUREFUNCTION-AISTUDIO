@@ -71,7 +71,8 @@ export const ProgramTemplates: React.FC<{
   clients: ClientProfile[];
   client: ClientProfile;
   onApply: (template: ProgramTemplate, ids: string[], start: string) => void;
-}> = ({ clients, client, onApply }) => {
+  onFlush?: () => Promise<boolean>;
+}> = ({ clients, client, onApply, onFlush }) => {
   const { templates, designerNames, ready, loading, error, reload, save, update, remove } = useProgramTemplates();
   const [name, setName] = useState('');
   const [scope, setScope] = useState<'week' | 'program'>('week');
@@ -133,14 +134,24 @@ export const ProgramTemplates: React.FC<{
     } catch (e) { setFeedback(e instanceof Error ? e.message : 'Could not save template.'); }
     finally { setBusy(false); }
   };
-  const apply = () => {
+  const activeTargets = targets.filter((id) => clients.some((c) => c.id === id));
+  const apply = async () => {
     if (operationLocked) return;
-    if (!selected || !targets.length) { setFeedback('Choose a template and at least one client.'); return; }
+    if (!selected || !activeTargets.length) { setFeedback('Choose a template and at least one client.'); return; }
     try {
-      const preview = applyProgramTemplate(clients, selected, targets, startDate);
-      onApply(selected, targets, startDate);
-      setFeedback(`Applied ${preview.copied} workouts to ${targets.length} clients. ${preview.skipped} days with results were protected.`);
+      const preview = applyProgramTemplate(clients, selected, activeTargets, startDate);
+      onApply(selected, activeTargets, startDate);
+      if (onFlush && preview.copied > 0) {
+        setBusy(true);
+        const saved = await onFlush();
+        if (!saved) {
+          setFeedback('Workouts could not be saved to the server yet. Retry save before leaving.');
+          return;
+        }
+      }
+      setFeedback(`Applied ${preview.copied} workouts to ${activeTargets.length} clients. ${preview.skipped} days with results were protected.`);
     } catch (e) { setFeedback(e instanceof Error ? e.message : 'Unable to apply template.'); }
+    finally { setBusy(false); }
   };
   const startEditing = () => {
     if (!selected || operationLocked || savingEditRef.current) return;
@@ -244,7 +255,7 @@ export const ProgramTemplates: React.FC<{
             </div>
           </fieldset>
           <div className="flex flex-wrap gap-3">
-            <button type="button" disabled={operationLocked} onClick={apply} className="min-h-[44px] bg-[#FFC809] text-[#111827] font-bold text-sm px-5 rounded-xl disabled:opacity-50">Apply template</button>
+            <button type="button" disabled={operationLocked} onClick={() => void apply()} className="min-h-[44px] bg-[#FFC809] text-[#111827] font-bold text-sm px-5 rounded-xl disabled:opacity-50">Apply template</button>
             <button
               type="button"
               aria-expanded={showPreview}
@@ -339,14 +350,32 @@ export const ProgramTemplates: React.FC<{
             </form>
           )}
           {editingSnapshot && (
-            <ProgramTemplateEditor
-              key={`editor-${editingSnapshot.id}`}
-              snapshot={editingSnapshot}
-              saving={savingEdit}
-              error={editError}
-              onSave={handleSaveEdit}
-              onCancel={handleCancelEdit}
-            />
+            <>
+              <ProgramTemplateEditor
+                key={`editor-${editingSnapshot.id}`}
+                snapshot={editingSnapshot}
+                saving={savingEdit}
+                error={editError}
+                onSave={handleSaveEdit}
+                onCancel={handleCancelEdit}
+              />
+              {editError && /reload templates/i.test(editError) && (
+                <div>
+                  <button
+                    type="button"
+                    disabled={loading || savingEdit}
+                    onClick={async () => {
+                      setEditingSnapshot(null);
+                      setEditError(null);
+                      await reload();
+                    }}
+                    className="min-h-[44px] border border-gray-200 rounded-xl px-4 text-sm font-medium text-[#111827] hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {loading ? 'Reloading…' : 'Reload templates'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {showPreview && previewData && (
             <div

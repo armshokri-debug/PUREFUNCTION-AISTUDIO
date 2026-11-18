@@ -191,7 +191,18 @@ export function cloneWorkout(w: Workout, date: string): Workout {
  * ======================================================================== */
 
 export function hasResults(w: Workout): boolean {
-  return w.status === 'completed' || w.blocks.some((b) => b.loggedSets.some((s) => s.completed));
+  return (
+    w.status === 'completed' ||
+    w.sessionRpe != null ||
+    !!w.clientFeedback?.trim() ||
+    w.blocks.some(
+      (b) =>
+        b.rpe != null ||
+        !!b.pain ||
+        !!b.clientNote?.trim() ||
+        b.loggedSets.some((s) => s.completed || s.reps != null)
+    )
+  );
 }
 
 export function workoutOn(client: ClientProfile, date: string): Workout | undefined {

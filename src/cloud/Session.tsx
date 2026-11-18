@@ -177,41 +177,55 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const signUp = async (email: string, password: string, name: string, portal: Profile['role']) => {
     if (!supabase) return 'Cloud is not configured.';
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return 'Enter your email address.';
+    if (password.length < 8) return 'Password must be at least 8 characters.';
     try {
       const res = await fetch(`${supabaseUrl}/functions/v1/sign-up`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password, name: name.trim() })
+        body: JSON.stringify({ email: cleanEmail, password, name: name.trim() })
       });
-      const body = (await res.json().catch(() => ({}))) as { error?: string; verificationRequired?: boolean };
-      if (!res.ok) return body.error ?? 'Could not create the account. Try again.';
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        msg?: string;
+        verificationRequired?: boolean;
+      };
+      if (!res.ok) return (body.error || body.message || body.msg || '').trim() || 'Could not create the account. Try again.';
       if (body.verificationRequired) return null;
     } catch {
       return 'No connection. Check your internet and try again.';
     }
-    return signIn(email, password, portal);
+    return signIn(cleanEmail, password, portal);
   };
 
   const resendVerification = async (email: string) => {
+    if (!supabase) return 'Cloud is not configured.';
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return 'Enter your email address.';
     try {
       const res = await fetch(`${supabaseUrl}/functions/v1/sign-up`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'resend', email: email.trim() })
+        body: JSON.stringify({ action: 'resend', email: cleanEmail })
       });
-      return res.ok ? null : 'Could not request verification. Try again.';
+      const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string; msg?: string };
+      return res.ok ? null : (body.error || body.message || body.msg || '').trim() || 'Could not request verification. Try again.';
     } catch { return 'No connection. Check your internet and try again.'; }
   };
 
   const forgotPassword = async (email: string) => {
     if (!supabase) return 'Cloud is not configured.';
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return 'Enter your email address.';
     try {
       const res = await fetch(`${supabaseUrl}/functions/v1/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() })
+        body: JSON.stringify({ email: cleanEmail })
       });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      return res.ok ? null : body.error ?? 'Could not send the email. Try again.';
+      const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string; msg?: string };
+      return res.ok ? null : (body.error || body.message || body.msg || '').trim() || 'Could not send the email. Try again.';
     } catch {
       return 'No connection. Check your internet and try again.';
     }

@@ -199,6 +199,28 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   useEffect(() => writeSaved('pf.clientId', selectedClientIdState), [selectedClientIdState]);
   const selectedClientId = isClientUser ? profile!.clientId ?? '' : selectedClientIdState;
   const [clientPreviewFrame, setClientPreviewFrame] = useState<boolean>(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutWarning, setSignOutWarning] = useState(false);
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    if (!profile) {
+      await signOut();
+      return;
+    }
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    setSigningOut(true);
+    setSignOutWarning(false);
+    const saved = await store.flush();
+    setSigningOut(false);
+    if (saved) {
+      await signOut();
+    } else {
+      setSignOutWarning(true);
+    }
+  };
 
   const selectedClient: ClientProfile | undefined =
     clients.find((c) => c.id === selectedClientId) || (isClientUser ? undefined : clients[0]);
@@ -405,10 +427,11 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
                   <SyncBadge sync={sync} railOnTablet />
                 </div>
                 <button
-                  onClick={() => void signOut()}
+                  onClick={() => void handleSignOut()}
+                  disabled={signingOut}
                   aria-label="Sign out"
                   title="Sign out"
-                  className="p-2 rounded-lg text-gray-600 hover:text-[#111827] hover:bg-gray-300/60 cursor-pointer"
+                  className="p-2 rounded-lg text-gray-600 hover:text-[#111827] hover:bg-gray-300/60 cursor-pointer disabled:opacity-50"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -465,10 +488,11 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
 
           {profile && (
             <button
-              onClick={() => void signOut()}
+              onClick={() => void handleSignOut()}
+              disabled={signingOut}
               aria-label="Sign out"
               title="Sign out"
-              className={`p-2 rounded-lg text-gray-400 hover:text-[#111827] hover:bg-gray-100 cursor-pointer ${
+              className={`p-2 rounded-lg text-gray-400 hover:text-[#111827] hover:bg-gray-100 cursor-pointer disabled:opacity-50 ${
                 isClientUser ? '' : 'md:hidden'
               }`}
             >
@@ -511,6 +535,19 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
       {role === 'coach' ? (
         <main className="flex-1 min-w-0 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-12">
           <div className="px-4 sm:px-8 lg:px-12 py-6 sm:py-10">
+            {signOutWarning && (
+              <div role="alert" className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 flex flex-wrap items-center justify-between gap-3 text-sm text-red-800">
+                <span>Changes have not finished saving to the cloud. Signing out now could lose recent edits.</span>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void handleSignOut()} className="min-h-[44px] px-4 rounded-xl bg-[#111827] text-white font-semibold text-xs cursor-pointer">
+                    Retry save &amp; sign out
+                  </button>
+                  <button type="button" onClick={() => { setSignOutWarning(false); void signOut(); }} className="min-h-[44px] px-4 rounded-xl border border-red-300 bg-white text-red-800 font-semibold text-xs cursor-pointer">
+                    Sign out anyway
+                  </button>
+                </div>
+              </div>
+            )}
             {coachTab === 'clients' && clientOpen && selectedClient ? (
               <ClientDetail
                 key={selectedClient.id}
@@ -578,6 +615,19 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
             }
           >
             {role === 'client' && !clientPreviewFrame && <InstallCard />}
+            {signOutWarning && (
+              <div role="alert" className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 space-y-2 text-sm text-red-800">
+                <p>Recent workout changes could not be saved yet. Retry saving before signing out.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void handleSignOut()} className="min-h-[44px] px-4 rounded-xl bg-[#111827] text-white font-semibold text-xs cursor-pointer">
+                    Retry save &amp; sign out
+                  </button>
+                  <button type="button" onClick={() => { setSignOutWarning(false); void signOut(); }} className="min-h-[44px] px-4 rounded-xl border border-red-300 bg-white text-red-800 font-semibold text-xs cursor-pointer">
+                    Sign out anyway
+                  </button>
+                </div>
+              </div>
+            )}
             {!selectedClient ? (
               <div className="text-center text-sm text-gray-500 py-20">
                 Your coach is setting up your profile. Pull to refresh in a moment.

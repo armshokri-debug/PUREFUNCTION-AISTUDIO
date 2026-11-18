@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
   ChevronLeft,
@@ -58,6 +58,8 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
   const [finishing, setFinishing] = useState(false);
   const [sessionRpe, setSessionRpe] = useState<number | null>(null);
   const [feedback, setFeedback] = useState('');
+  const latestClientRef = useRef(client);
+  latestClientRef.current = client;
 
   const workout = workoutOn(client, date);
 
@@ -73,43 +75,56 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
 
   /* ---------------- saving ---------------- */
 
-  const save = (w: Workout) => onUpdateClient(upsertWorkout(client, w));
+  const save = (w: Workout) => {
+    const next = upsertWorkout(latestClientRef.current, w);
+    latestClientRef.current = next;
+    onUpdateClient(next);
+  };
 
   const patchBlock = (blockId: string, patch: Partial<WorkoutBlock>) => {
-    if (!workout) return;
-    save({ ...workout, blocks: workout.blocks.map((b) => (b.id === blockId ? { ...b, ...patch } : b)) });
+    const currentWorkout = workoutOn(latestClientRef.current, date);
+    if (!currentWorkout) return;
+    save({ ...currentWorkout, blocks: currentWorkout.blocks.map((b) => (b.id === blockId ? { ...b, ...patch } : b)) });
   };
 
   const patchSet = (block: WorkoutBlock, setNumber: number, patch: Partial<SetLog>) => {
+    const currentWorkout = workoutOn(latestClientRef.current, date);
+    const currentBlock = currentWorkout?.blocks.find((b) => b.id === block.id) ?? block;
     patchBlock(block.id, {
-      loggedSets: block.loggedSets.map((s) => (s.setNumber === setNumber ? { ...s, ...patch } : s))
+      loggedSets: currentBlock.loggedSets.map((s) => (s.setNumber === setNumber ? { ...s, ...patch } : s))
     });
   };
 
   const toggleSet = (block: WorkoutBlock, s: SetLog) => {
-    if (s.completed) {
-      patchSet(block, s.setNumber, { completed: false });
+    const currentWorkout = workoutOn(latestClientRef.current, date);
+    const currentBlock = currentWorkout?.blocks.find((b) => b.id === block.id) ?? block;
+    const currentSet = currentBlock.loggedSets.find((x) => x.setNumber === s.setNumber) ?? s;
+    if (currentSet.completed) {
+      patchSet(currentBlock, currentSet.setNumber, { completed: false });
       return;
     }
-    const target = parseReps(block.reps);
-    const reps = s.reps ?? (target.kind === 'reps' && target.max > 0 ? target.max : target.kind === 'time' ? target.min : null);
-    patchSet(block, s.setNumber, { completed: true, reps, kg: s.kg ?? (block.loadKg || 0) });
-    if (block.restSec > 0) {
-      setRest({ endsAt: Date.now() + block.restSec * 1000, total: block.restSec });
+    const target = parseReps(currentBlock.reps);
+    const reps = currentSet.reps ?? (target.kind === 'reps' && target.max > 0 ? target.max : target.kind === 'time' ? target.min : null);
+    patchSet(currentBlock, currentSet.setNumber, { completed: true, reps, kg: currentSet.kg ?? (currentBlock.loadKg || 0) });
+    if (currentBlock.restSec > 0) {
+      setRest({ endsAt: Date.now() + currentBlock.restSec * 1000, total: currentBlock.restSec });
       setNow(Date.now());
     }
   };
 
   const useSuggested = (block: WorkoutBlock, kg: number) => {
+    const currentWorkout = workoutOn(latestClientRef.current, date);
+    const currentBlock = currentWorkout?.blocks.find((b) => b.id === block.id) ?? block;
     patchBlock(block.id, {
-      loggedSets: block.loggedSets.map((s) => (s.completed ? s : { ...s, kg }))
+      loggedSets: currentBlock.loggedSets.map((s) => (s.completed ? s : { ...s, kg }))
     });
   };
 
   const finish = () => {
-    if (!workout) return;
+    const currentWorkout = workoutOn(latestClientRef.current, date);
+    if (!currentWorkout) return;
     save({
-      ...workout,
+      ...currentWorkout,
       status: 'completed',
       completedAt: new Date().toISOString(),
       sessionRpe: sessionRpe ?? undefined,

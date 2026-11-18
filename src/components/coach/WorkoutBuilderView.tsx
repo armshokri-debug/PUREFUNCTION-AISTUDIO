@@ -124,6 +124,8 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
   const [copyTo, setCopyTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const libraryRef = useRef<HTMLDivElement>(null);
+  const latestClientRef = useRef(client);
+  latestClientRef.current = client;
 
   const days = weekDates(weekStart);
   const workout = workoutOn(client, selectedDate);
@@ -154,21 +156,32 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
 
   /* ---------------- workout edits (saved immediately) ---------------- */
 
-  const saveWorkout = (w: Workout) => onUpdateClient(upsertWorkout(client, w));
+  const commitClient = (next: ClientProfile) => {
+    latestClientRef.current = next;
+    onUpdateClient(next);
+  };
+
+  const saveWorkout = (w: Workout) => commitClient(upsertWorkout(latestClientRef.current, w));
 
   const patchWorkout = (patch: Partial<Workout>) => {
-    if (workout) saveWorkout({ ...workout, ...patch });
+    const currentWorkout = workoutOn(latestClientRef.current, selectedDate);
+    if (currentWorkout) saveWorkout({ ...currentWorkout, ...patch });
   };
 
   const patchBlock = (blockId: string, patch: Partial<WorkoutBlock>) => {
-    if (!workout) return;
+    const currentWorkout = workoutOn(latestClientRef.current, selectedDate);
+    if (!currentWorkout) return;
     saveWorkout({
-      ...workout,
-      blocks: workout.blocks.map((b) => {
+      ...currentWorkout,
+      blocks: currentWorkout.blocks.map((b) => {
         if (b.id !== blockId) return b;
         const next = { ...b, ...patch };
         if (patch.sets !== undefined || patch.loadKg !== undefined) {
-          const sets = resizeSets(next.loggedSets, next.sets, next.loadKg || null);
+          const minLogged = next.loggedSets.reduce(
+            (max, s, idx) => (s.completed || s.reps != null ? idx + 1 : max),
+            0
+          );
+          const sets = resizeSets(next.loggedSets, Math.max(next.sets, minLogged), next.loadKg || null);
           next.loggedSets =
             patch.loadKg !== undefined
               ? sets.map((s) => (s.completed ? s : { ...s, kg: next.loadKg || null }))
@@ -180,9 +193,10 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
   };
 
   const addExercise = (exercise: Exercise) => {
-    const base = workout ?? blankWorkout(selectedDate);
+    const latestClient = latestClientRef.current;
+    const base = workoutOn(latestClient, selectedDate) ?? blankWorkout(selectedDate);
     const block = defaultBlockFor(exercise);
-    const prev = lastPerformance(client, exercise.id, selectedDate);
+    const prev = lastPerformance(latestClient, exercise.id, selectedDate);
     if (prev) {
       block.reps = prev.reps;
       block.sets = prev.plannedSets;
@@ -194,30 +208,32 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
   };
 
   const moveBlock = (index: number, dir: -1 | 1) => {
-    if (!workout) return;
+    const currentWorkout = workoutOn(latestClientRef.current, selectedDate);
+    if (!currentWorkout) return;
     const to = index + dir;
-    if (to < 0 || to >= workout.blocks.length) return;
-    const blocks = [...workout.blocks];
+    if (to < 0 || to >= currentWorkout.blocks.length) return;
+    const blocks = [...currentWorkout.blocks];
     [blocks[index], blocks[to]] = [blocks[to], blocks[index]];
     if (blocks[0].supersetWithPrevious) blocks[0] = { ...blocks[0], supersetWithPrevious: false };
-    saveWorkout({ ...workout, blocks });
+    saveWorkout({ ...currentWorkout, blocks });
   };
 
   const removeBlock = (blockId: string) => {
-    if (!workout) return;
-    const blocks = workout.blocks.filter((b) => b.id !== blockId);
+    const currentWorkout = workoutOn(latestClientRef.current, selectedDate);
+    if (!currentWorkout) return;
+    const blocks = currentWorkout.blocks.filter((b) => b.id !== blockId);
     if (blocks[0]?.supersetWithPrevious) blocks[0] = { ...blocks[0], supersetWithPrevious: false };
-    saveWorkout({ ...workout, blocks });
+    saveWorkout({ ...currentWorkout, blocks });
   };
 
   const handleCopyWeek = () => {
     const target = addDays(weekStart, 7);
-    const r = copyWeek(client, weekStart, target);
+    const r = copyWeek(latestClientRef.current, weekStart, target);
     if (r.copied === 0 && r.skipped === 0) {
       flash('Nothing to copy — this week has no workouts.', true);
       return;
     }
-    onUpdateClient(r.client);
+    commitClient(r.client);
     flash(
       `Copied ${r.copied} workout${r.copied === 1 ? '' : 's'} to ${formatWeekRange(target)}` +
         (r.skipped ? ` · ${r.skipped} skipped (already logged)` : ''),
@@ -226,13 +242,14 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
   };
 
   const handleCopyDay = () => {
-    if (!workout || !copyTo) return;
-    const r = copyWorkouts(client, [{ from: workout, toDate: copyTo }]);
+    const currentWorkout = workoutOn(latestClientRef.current, selectedDate);
+    if (!currentWorkout || !copyTo) return;
+    const r = copyWorkouts(latestClientRef.current, [{ from: currentWorkout, toDate: copyTo }]);
     if (r.skipped) {
       flash(`${formatDate(copyTo, { weekday: true })} already has logged results — not overwritten.`, true);
       return;
     }
-    onUpdateClient(r.client);
+    commitClient(r.client);
     flash(`Copied to ${formatDate(copyTo, { weekday: true })}`);
     setCopyTo(null);
   };
@@ -639,7 +656,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                 {confirmDelete ? (
                   <button
                     onClick={() => {
-                      onUpdateClient(removeWorkout(client, workout.id));
+                      commitClient(removeWorkout(latestClientRef.current, workout.id));
                       setConfirmDelete(false);
                       flash('Workout deleted');
                     }}
