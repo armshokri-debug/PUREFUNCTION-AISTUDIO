@@ -1,0 +1,85 @@
+name: Deploy to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: 'Full main commit SHA reviewed for release'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the reviewed main commit
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" || ! "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ || "$REVIEWED_SHA" != "$GITHUB_SHA" ]]; then
+            echo "Select main and enter its full reviewed commit SHA."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --legacy-peer-deps
+      - run: npm run lint
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: node e2e/responsive-check.cjs dist
+      - run: npx vite build --outDir dist-cloud --base=/
+        env:
+          VITE_SUPABASE_URL: https://mock.supabase.co
+          VITE_SUPABASE_ANON_KEY: anon
+      - run: node e2e/cloud-flow.cjs dist-cloud
+      - run: node e2e/program-template-preview.cjs dist-cloud
+      # Build for the repository Pages path.
+      - run: npx vite build --base=/${{ github.event.repository.name }}/
+        env:
+          # Cloud project "pure-function-2". Both values are public by design;
+          # access is enforced by Row Level Security in the database.
+          VITE_SUPABASE_URL: https://rugwzvztweiffprkxfdc.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_Z0naU2LSCJJNEUFWqkoyHg_0AJo4yiw
+      - run: cp dist/index.html dist/404.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium
+      - run: node e2e/production-smoke.cjs https://armshokri-debug.github.io/PUREFUNCTION-NEW/
