@@ -130,6 +130,13 @@ const today = iso(new Date());
   await saveNow.click();
   await C.getByText('All changes saved', { exact: true }).waitFor({ timeout: 5000 });
   ok(mock.db.workouts.some(x => x.id === w.id), 'manual save retains the existing cloud workout');
+  // Repeated clean saves must release the single-flight lock. The next Sets
+  // edits below must still reach the server after these no-op flushes.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await saveNow.click();
+    await C.getByText('All changes saved', { exact: true }).waitFor({ timeout: 5000 });
+  }
+  ok(await saveNow.isEnabled(), 'repeated no-op saves release the save lock');
   // Regression: clearing Sets must not immediately force zero, and commit must persist.
   const setsField = C.getByLabel('Sets', { exact: true }).first();
   await setsField.fill('');

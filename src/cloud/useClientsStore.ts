@@ -182,7 +182,9 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
       return inflightFlush.current;
     }
     flushing.current = true;
-    const run = (async (): Promise<boolean> => {
+    // Register the in-flight promise before work can finish. A no-op flush has
+    // no awaits, so starting it inline would clear the lock before assigning it.
+    const run = Promise.resolve().then(async (): Promise<boolean> => {
       setSync('saving');
       let failed = false;
       let conflict = false;
@@ -304,7 +306,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
         timer.current = window.setTimeout(() => void flushRef.current(), 600);
       }
       return !pending;
-    })();
+    });
     inflightFlush.current = run;
     return run;
   }, [hasPendingChanges, isCoach, profile]);
