@@ -1,7 +1,7 @@
 // Public signed-out production checks only. No credentials, mail or data writes.
 const { chromium } = require('playwright');
 const url = process.argv[2];
-if (!url || !url.startsWith('https://armshokri-debug.github.io/PUREFUNCTION-NEW/')) throw Error('Expected production URL');
+if (url !== 'https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/') throw Error('Expected production URL');
 (async () => {
   const browser = await chromium.launch();
   try {
