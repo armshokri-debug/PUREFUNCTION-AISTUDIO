@@ -1,4 +1,4 @@
-// Focused browser verification for read-only Program Template preview.
+// Browser verification for Program Templates and their workout lifecycle.
 // Usage: node e2e/program-template-preview.cjs <dist-cloud dir built with VITE_SUPABASE_URL=https://mock.supabase.co>
 const { chromium } = require('playwright');
 const http = require('http');
@@ -68,7 +68,6 @@ async function measureOverflow(page) {
       : {}
   );
 
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   let templateGetMode = 'ok';
   let templateGetOverride = null;
   let templateGetCount = 0;
@@ -78,9 +77,17 @@ async function measureOverflow(page) {
   let templateUpdateRpcMode = 'ok';
   const templateRpcCalls = [];
   let templateDirectPatchCount = 0;
-  await ctx.route('https://mock.supabase.co/**', async (route) => {
+  let rejectWorkoutWrites = false;
+  const handleMockRequest = async (route) => {
     const req = route.request();
     const url = new URL(req.url());
+    if (rejectWorkoutWrites && ['POST', 'PATCH'].includes(req.method()) && url.pathname === '/rest/v1/workouts') {
+      return route.fulfill({
+        status: 503,
+        headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'Simulated workout save failure' })
+      });
+    }
     if (req.method() === 'PATCH' && url.pathname === '/rest/v1/program_templates') {
       templateDirectPatchCount++;
     }
@@ -187,13 +194,28 @@ async function measureOverflow(page) {
       }
     }
     return mock.handler(route);
-  });
-  await ctx.routeWebSocket(/wss:\/\/mock\.supabase\.co\/.*/, mock.wsHandler);
-  const page = await ctx.newPage();
+  };
+  const appUrl = `http://localhost:${PORT}/`;
   const pageErrors = [];
-  page.on('pageerror', (e) => pageErrors.push(e.message));
-
-  await page.goto(`http://localhost:${PORT}/`);
+  const openSession = async () => {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      serviceWorkers: 'block'
+    });
+    await context.route('**/*', (route) =>
+      new URL(route.request().url()).origin === new URL(appUrl).origin ? route.continue() : route.abort()
+    );
+    await context.route('https://mock.supabase.co/**', handleMockRequest);
+    await context.routeWebSocket('**/*', (ws) => {
+      if (new URL(ws.url()).origin === 'wss://mock.supabase.co') return mock.wsHandler(ws);
+      return ws.close();
+    });
+    const page = await context.newPage();
+    page.on('pageerror', (e) => pageErrors.push(e.message));
+    await page.goto(appUrl);
+    return page;
+  };
+  let page = await openSession();
   await page.getByRole('tab', { name: 'I’m the coach' }).click();
   await page.getByRole('button', { name: 'Create coach account' }).click();
   await page.getByLabel('Your name').fill('Coach Demo');
@@ -871,9 +893,43 @@ async function measureOverflow(page) {
     'lifecycle: completed workout and recorded results preserved in mock DB'
   );
 
-  // Reload and verify UI reflects persisted workouts, protected completed workout, and untouched unselected client
-  await page.reload();
+  // Replacing a planned workout must keep the stored version if the write fails.
+  const priorWorkout = JSON.stringify(persistedDestWed);
+  const priorBlockId = persistedDestWed.data.blocks[0].id;
+  rejectWorkoutWrites = true;
+  await page.getByRole('button', { name: 'Apply template' }).click();
+  await page.getByText('Workouts could not be saved to the server yet. Retry save before leaving.').waitFor();
+  ok(
+    JSON.stringify(mock.db.workouts.find((w) => w.id === persistedDestWed.id)) === priorWorkout,
+    'lifecycle: failed template replacement preserves the stored planned workout'
+  );
+
+  rejectWorkoutWrites = false;
+  await page.getByRole('button', { name: 'Retry save', exact: true }).click();
+  await page.getByText('All changes saved', { exact: true }).waitFor();
+  const retriedWorkout = mock.db.workouts.find((w) => w.id === persistedDestWed.id);
+  ok(
+    !!retriedWorkout && retriedWorkout.data.blocks[0].id !== priorBlockId &&
+      mock.db.workouts.filter((w) => w.client_id === 'client-syn-2' && w.date === destWed).length === 1,
+    'lifecycle: retry replaces the workout in place without creating a duplicate'
+  );
+
+  // Sign in from a clean browser context to verify persistence without a cached session.
+  await page.context().close();
+  page = await openSession();
+  await page.getByRole('tab', { name: 'I’m the coach' }).click();
+  await page.getByLabel('Email').fill('coach@example.com');
+  await page.getByLabel('Password').fill('coachpass1');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('heading', { name: 'Clients' }).waitFor();
   await page.getByRole('button', { name: 'Programs' }).first().click();
+  await page.getByLabel('Saved template').selectOption(savedTplRow.id);
+  await page.getByRole('button', { name: 'Show preview' }).click();
+  ok(
+    (await page.locator('#program-template-preview').innerText()).includes('Lifecycle Week Template'),
+    'lifecycle: saved template is available after signing in from a clean context'
+  );
+  await page.getByRole('button', { name: 'Hide preview' }).click();
   await page.getByLabel('Program for client').selectOption('client-syn-2');
   await page.getByRole('button', { name: 'Next week', exact: true }).click();
   await page.getByRole('button', { name: labelDate(destWed) }).click();

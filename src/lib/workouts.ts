@@ -251,7 +251,9 @@ export function copyWorkouts(client: ClientProfile, pairs: { from: Workout; toDa
       skipped++;
       continue;
     }
-    next = upsertWorkout(next, cloneWorkout(from, toDate));
+    const copy = cloneWorkout(from, toDate);
+    // Keep the destination row so cloud sync can replace it with a versioned update.
+    next = upsertWorkout(next, existing ? { ...copy, id: existing.id } : copy);
     copied++;
   }
   return { client: next, copied, skipped };
