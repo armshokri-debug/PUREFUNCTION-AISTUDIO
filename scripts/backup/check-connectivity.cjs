@@ -85,9 +85,14 @@ function postgresFailure(result, connected) {
 
 function checkPostgres(env, run) {
   const ref = env.SUPABASE_PROJECT_REF;
-  const raw = env.SUPABASE_DB_URL?.trim();
+  let raw = env.SUPABASE_DB_URL?.trim();
+  if (raw) {
+    raw = raw.replace(/^(?:SUPABASE_DB_URL\s*=\s*|psql\s+)/i, '').trim();
+    if ((raw.startsWith('"') && raw.endsWith('"')) ||
+        (raw.startsWith("'") && raw.endsWith("'"))) raw = raw.slice(1, -1);
+  }
   requireProbe(raw, 'Database URI secret is empty');
-  requireProbe(/^postgres(?:ql)?:\/\//i.test(raw), 'Database secret must contain the PostgreSQL URI only');
+  requireProbe(/^postgres(?:ql)?:\/\//i.test(raw), 'Database secret does not contain a recognized PostgreSQL URI');
   let uri;
   try {
     uri = new URL(raw);

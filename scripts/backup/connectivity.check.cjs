@@ -113,3 +113,13 @@ test('reports malformed database URLs without logging the URL', async () => {
   assert.ok(!inputs.log.join('\n').includes('private%K1'));
   assert.ok(!inputs.calls.some(([method]) => method === 'postgres'));
 });
+
+test('accepts a copied Supabase psql command as text without executing it', async () => {
+  const inputs = fixture();
+  assert.equal(await runConnectivity({
+    ...inputs,
+    log: inputs.logLine,
+    env: { ...env, SUPABASE_DB_URL: "psql '" + env.SUPABASE_DB_URL + "'" }
+  }), true);
+  assert.equal(inputs.calls.filter(([kind]) => kind === 'postgres').length, 1);
+});
