@@ -5,8 +5,7 @@ const { EXPECTED_BUCKETS } = require('./backup-lib.cjs');
 
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const SCHEMAS = "('public', 'private', 'auth', 'storage', 'supabase_migrations')";
-const PROBE_SQL = `
-BEGIN READ ONLY;
+const PRIVILEGE_SQL = `
 SELECT
   (SELECT count(*) = 5 AND bool_and(has_schema_privilege(oid, 'USAGE'))
    FROM pg_namespace WHERE nspname IN ${SCHEMAS})
@@ -16,11 +15,17 @@ SELECT
       AND CASE WHEN c.relkind = 'S' THEN NOT has_sequence_privilege(c.oid, 'SELECT')
                ELSE NOT has_table_privilege(c.oid, 'SELECT') OR row_security_active(c.oid) END
   );
-SELECT 1 FROM public.clients LIMIT 0;
-SELECT 1 FROM auth.users LIMIT 0;
-SELECT 1 FROM storage.objects LIMIT 0;
-ROLLBACK;
 `;
+const DB_STATEMENTS = [
+  'BEGIN READ ONLY',
+  "SET LOCAL statement_timeout = '12s'",
+  "SELECT 'connected'",
+  PRIVILEGE_SQL,
+  'SELECT 1 FROM public.clients LIMIT 0',
+  'SELECT 1 FROM auth.users LIMIT 0',
+  'SELECT 1 FROM storage.objects LIMIT 0',
+  'ROLLBACK'
+];
 
 class ProbeFailure extends Error {}
 
@@ -65,6 +70,19 @@ async function checkDrive(env, fetcher) {
   return 'Refresh Token, drive.file scope and Drive API read access verified';
 }
 
+function postgresFailure(result, connected) {
+  const diagnostic = result.stderr ?? '';
+  if (result.error?.code === 'ENOENT') return 'PostgreSQL client is unavailable';
+  if (result.error?.code === 'ETIMEDOUT' || /timeout expired|connection timed out/i.test(diagnostic)) return 'PostgreSQL connection or query timed out';
+  if (/password authentication failed|28P01|wrong password|authentication failed/i.test(diagnostic)) return 'PostgreSQL authentication rejected the configured credentials';
+  if (/tenant or user not found|role .* does not exist|28000/i.test(diagnostic)) return 'PostgreSQL did not recognize the configured pooler user or project';
+  if (/42501|permission denied|row-level security/i.test(diagnostic)) return 'PostgreSQL authentication worked but read privileges are incomplete';
+  if (/42P01|3F000|relation .* does not exist/i.test(diagnostic)) return 'A required PostgreSQL table or schema is unavailable';
+  if (/could not translate host|name or service not known|connection refused|network is unreachable|no route to host/i.test(diagnostic)) return 'PostgreSQL host could not be reached';
+  if (/certificate|SSL error|TLS error/i.test(diagnostic)) return 'PostgreSQL TLS connection failed';
+  return connected ? 'PostgreSQL authenticated but the read-only query failed' : 'PostgreSQL connection or read-only query failed';
+}
+
 function checkPostgres(env, run) {
   const ref = env.SUPABASE_PROJECT_REF;
   const uri = new URL(env.SUPABASE_DB_URL);
@@ -80,7 +98,10 @@ function checkPostgres(env, run) {
     'Database URI does not match the expected Supabase configuration'
   );
 
-  const result = run('psql', ['-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', PROBE_SQL], {
+  const result = run('psql', [
+    '-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=verbose',
+    ...DB_STATEMENTS.flatMap(statement => ['-c', statement])
+  ], {
     encoding: 'utf8',
     timeout: 25000,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -93,11 +114,12 @@ function checkPostgres(env, run) {
       PGPASSWORD: decodeURIComponent(uri.password),
       PGSSLMODE: sslmode,
       PGCONNECT_TIMEOUT: '10',
-      PGOPTIONS: '-c default_transaction_read_only=on -c statement_timeout=12000'
+      LC_ALL: 'C'
     }
   });
-  requireProbe(result.status === 0, 'PostgreSQL connection or read-only query failed');
-  requireProbe(result.stdout.trim() === 't', 'PostgreSQL read privileges are incomplete');
+  const [connectionMarker, privileges] = (result.stdout ?? '').trim().split('\n');
+  if (result.status !== 0) throw new ProbeFailure(postgresFailure(result, connectionMarker === 'connected'));
+  requireProbe(connectionMarker === 'connected' && privileges === 't', 'PostgreSQL read privileges are incomplete');
   return 'PostgreSQL connection and read privileges on backup schemas verified';
 }
 

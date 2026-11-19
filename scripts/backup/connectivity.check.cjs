@@ -17,7 +17,7 @@ const env = {
   BACKUP_GDRIVE_REFRESH_TOKEN: 'mock-refresh'
 };
 
-function fixture({ scope = 'https://www.googleapis.com/auth/drive.file', dbStatus = 0, dbPrivileges = 't', objectStatus = 200 } = {}) {
+function fixture({ scope = 'https://www.googleapis.com/auth/drive.file', dbStatus = 0, dbPrivileges = 't', dbDiagnostic = 'private SQL diagnostic', objectStatus = 200 } = {}) {
   const calls = [];
   const log = [];
   return {
@@ -28,12 +28,12 @@ function fixture({ scope = 'https://www.googleapis.com/auth/drive.file', dbStatu
     run(command, args, options) {
       calls.push(['postgres', command]);
       assert.equal(command, 'psql');
-      assert.match(args.at(-1), /^\s*BEGIN READ ONLY;/);
-      assert.match(args.at(-1), /ROLLBACK;\s*$/);
+      assert.equal(args[args.indexOf('-c') + 1], 'BEGIN READ ONLY');
+      assert.equal(args.at(-1), 'ROLLBACK');
       assert.equal(options.env.PGPASSWORD, 'sample@password');
-      assert.match(options.env.PGOPTIONS, /default_transaction_read_only=on/);
+      assert.ok(args.includes("SET LOCAL statement_timeout = '12s'"));
       assert.ok(!args.join(' ').includes('sample@password'));
-      return { status: dbStatus, stdout: dbPrivileges + '\n', stderr: 'private SQL diagnostic' };
+      return { status: dbStatus, stdout: 'connected\n' + dbPrivileges + '\n', stderr: dbDiagnostic };
     },
     async fetcher(url, options) {
       const parsed = new URL(url);
@@ -96,4 +96,11 @@ test('rejects credentials targeting other database and Storage hosts', async () 
   const mismatched = { ...env, SUPABASE_DB_URL: 'postgresql://postgres:example@other.example/postgres?sslmode=require', SUPABASE_URL: 'https://other.example' };
   assert.equal(await runConnectivity({ ...inputs, log: inputs.logLine, env: mismatched }), false);
   assert.equal(inputs.calls.length, 2);
+});
+
+test('classifies a PostgreSQL authentication failure without exposing its diagnostic', async () => {
+  const inputs = fixture({ dbStatus: 2, dbDiagnostic: 'FATAL: password authentication failed for user private-name' });
+  assert.equal(await runConnectivity({ ...inputs, log: inputs.logLine }), false);
+  assert.ok(inputs.log.includes('FAIL PostgreSQL: PostgreSQL authentication rejected the configured credentials'));
+  assert.ok(!inputs.log.join('\n').includes('private-name'));
 });
