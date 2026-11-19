@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PureFunction Backup — Homepage</title>
+    <meta
+      name="description"
+      content="PureFunction Backup is a private, owner-operated utility that uploads AES-256-GCM encrypted Supabase disaster-recovery archives to the project owner's Google Drive using the limited drive.file scope."
+    />
+    <style>
+      :root {
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --ink: #111827;
+        --muted: #4b5563;
+        --border: #e5e7eb;
+        --accent: #ffc809;
+        --accent-ink: #111827;
+        --code-bg: #f3f4f6;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--ink);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      a:hover {
+        opacity: 0.78;
+      }
+
+      .wrap {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: 24px 20px 56px;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 20px;
+        padding-bottom: 18px;
+        margin-bottom: 28px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 1rem;
+        letter-spacing: -0.01em;
+        text-decoration: none;
+      }
+
+      .brand-mark {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        background: var(--accent);
+        border: 1px solid var(--ink);
+        flex-shrink: 0;
+      }
+
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-size: 0.9375rem;
+      }
+
+      nav a {
+        text-decoration: none;
+        color: var(--muted);
+        padding: 6px 0;
+      }
+
+      nav a[aria-current="page"] {
+        color: var(--ink);
+        font-weight: 600;
+        border-bottom: 2px solid var(--ink);
+      }
+
+      .hero {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 28px 24px;
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(1.5rem, 3.6vw, 2rem);
+        line-height: 1.25;
+        letter-spacing: -0.02em;
+      }
+
+      .lead {
+        margin: 0 0 20px;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 10px 18px;
+        border-radius: 8px;
+        background: var(--ink);
+        color: #ffffff;
+        font-weight: 600;
+        font-size: 0.9375rem;
+        text-decoration: none;
+      }
+
+      .btn-primary:hover {
+        opacity: 0.9;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 22px 24px;
+        margin-bottom: 16px;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 1.125rem;
+        line-height: 1.35;
+        letter-spacing: -0.01em;
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      p:last-child {
+        margin-bottom: 0;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      li {
+        margin-bottom: 8px;
+      }
+
+      li:last-child {
+        margin-bottom: 0;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.875em;
+        background: var(--code-bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .notice {
+        border-left: 4px solid var(--accent);
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        font-size: 0.95rem;
+      }
+
+      footer {
+        margin-top: 32px;
+        padding-top: 18px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.875rem;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 10px 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="brand" href="./index.html">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>PureFunction Backup</span>
+        </a>
+        <nav aria-label="Primary navigation">
+          <a href="./index.html" aria-current="page">Homepage</a>
+          <a href="./privacy.html">Privacy Policy</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero">
+          <p class="eyebrow">Private Owner Backup Utility</p>
+          <h1>PureFunction Backup</h1>
+          <p class="lead">
+            PureFunction Backup is a private, automated disaster-recovery utility operated solely by
+            the Pure Function project owner. It creates encrypted backups of the project's Supabase
+            backend and stores them in a dedicated folder in the project owner's Google Drive.
+          </p>
+          <div class="actions">
+            <a class="btn-primary" href="./privacy.html">Read Privacy Policy</a>
+          </div>
+        </section>
+
+        <div class="notice">
+          <strong>Separate from the Pure Function coaching app:</strong> PureFunction Backup is an
+          internal infrastructure backup tool, not a public consumer application. Coaching clients
+          and coaches do not sign in with Google or interact with this tool.
+        </div>
+
+        <section class="card">
+          <h2>What PureFunction Backup Does</h2>
+          <ul>
+            <li>
+              Reads a point-in-time snapshot of the Pure Function Supabase project (PostgreSQL
+              schemas, authentication metadata, and private storage objects) in read-only mode.
+            </li>
+            <li>
+              Compresses and encrypts every archive locally with <code>AES-256-GCM</code>
+              (<code>PFBK1</code> format with <code>scrypt</code> key derivation) and verifies the
+              decryption checksum before any file is uploaded.
+            </li>
+            <li>
+              Uploads only the encrypted archive (<code>.tar.gz.enc</code>) and a non-PII
+              verification manifest (<code>.manifest.json</code>) into a dedicated backup folder
+              (default: <code>PureFunction-Encrypted-Backups</code>) in the project owner's Google
+              Drive.
+            </li>
+            <li>
+              Manages retention inside that folder by deleting expired backup archives and matching
+              manifests past the configured retention window (default: 30 days) while always
+              preserving at least the newest configured minimum backups (default: 7).
+            </li>
+          </ul>
+        </section>
+
+        <section class="card">
+          <h2>Google Drive Permission Scope</h2>
+          <p>
+            PureFunction Backup requests only the single, least-privilege OAuth 2.0 scope
+            <code>https://www.googleapis.com/auth/drive.file</code>.
+          </p>
+          <p>
+            This restricts access strictly to the backup folder and backup files created by
+            PureFunction Backup itself. The utility cannot view, list, read, modify, or delete any
+            other files or folders in the owner's Google Drive, and it does not request access to
+            any other Google service.
+          </p>
+        </section>
+
+        <section class="card">
+          <h2>Privacy &amp; Data Handling</h2>
+          <p>
+            Full details on Google Drive API usage, encryption, data retention, and how to revoke
+            access or delete backups are documented in our
+            <a href="./privacy.html">PureFunction Backup Privacy Policy</a>.
+          </p>
+        </section>
+      </main>
+
+      <footer>
+        <span>PureFunction Backup — Private Disaster-Recovery Utility</span>
+        <a href="./privacy.html">Privacy Policy</a>
+      </footer>
+    </div>
+  </body>
+</html>
