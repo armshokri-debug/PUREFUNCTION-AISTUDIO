@@ -22,6 +22,7 @@ on:
         type: choice
         options:
           - validate-only
+          - connectivity-only
           - live-backup
       confirm_live_backup:
         description: 'Type RUN_BACKUP only when running an approved live-backup'
@@ -76,6 +77,39 @@ jobs:
           BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS }}
           BACKUP_MIN_KEEP_COUNT: ${{ vars.BACKUP_MIN_KEEP_COUNT }}
         run: node scripts/backup/run-backup.cjs --validate-only
+
+  check-backup-connectivity:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'connectivity-only' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Ensure the PostgreSQL client is installed
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+      - name: Test read-only connectivity with synthetic responses
+        run: node --test scripts/backup/connectivity.check.cjs
+      - name: Verify read-only service connectivity
+        env:
+          ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_GDRIVE_CLIENT_ID: ${{ secrets.BACKUP_GDRIVE_CLIENT_ID }}
+          BACKUP_GDRIVE_CLIENT_SECRET: ${{ secrets.BACKUP_GDRIVE_CLIENT_SECRET }}
+          BACKUP_GDRIVE_REFRESH_TOKEN: ${{ secrets.BACKUP_GDRIVE_REFRESH_TOKEN }}
+        run: node scripts/backup/check-connectivity.cjs
 
   # Live read-only encrypted backup job — gated behind BOTH vars.ENABLE_SUPABASE_BACKUP == 'true'
   # AND explicit manual confirmation (or future approved schedule).
