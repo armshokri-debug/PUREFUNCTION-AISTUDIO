@@ -106,20 +106,18 @@ function checkPostgres(env, run) {
   } catch {
     throw new ProbeFailure('Database URI contains invalid percent-encoding');
   }
-  requireProbe(password, 'Database URI password field is empty');
-  requireProbe(!/^\[YOUR-(?:DATABASE-)?PASSWORD\]$/i.test(password), 'Database URI password field still contains the Supabase placeholder');
+  requireProbe(password && !/^\[YOUR-(?:DATABASE-)?PASSWORD\]$/i.test(password), 'Database URI has no password or still contains the password placeholder');
   requireProbe(!password.includes('\0') && !user.includes('\0'), 'Database URI contains an invalid encoded character');
   const direct = uri.hostname === `db.${ref}.supabase.co`;
   const pooler = /^[a-z0-9-]+\.pooler\.supabase\.com$/.test(uri.hostname) && user.endsWith(`.${ref}`);
   const sslmode = uri.searchParams.get('sslmode');
-  requireProbe(['postgres:', 'postgresql:'].includes(uri.protocol), 'Database URI is not a PostgreSQL URI');
-  requireProbe(direct || /^[a-z0-9-]+\.pooler\.supabase\.com$/.test(uri.hostname), 'Database URI hostname is not the expected Supabase endpoint');
-  requireProbe(direct || pooler, 'Database Session Pooler username does not end with the project reference');
-  requireProbe(!uri.port || uri.port === '5432', 'Database URI must use Session Pooler port 5432');
-  requireProbe(uri.pathname === '/postgres', 'Database URI path must be /postgres');
-  requireProbe(!uri.hash, 'Database URI contains a fragment; check password encoding or remove a trailing fragment');
-  requireProbe(['require', 'verify-ca', 'verify-full'].includes(sslmode), 'Database URI lacks a supported sslmode');
-  requireProbe([...uri.searchParams.keys()].every(key => key === 'sslmode'), 'Database URI contains parameters other than sslmode');
+  requireProbe(
+    ['postgres:', 'postgresql:'].includes(uri.protocol) && (direct || pooler) &&
+    (!uri.port || uri.port === '5432') && uri.pathname === '/postgres' && uri.password &&
+    ['require', 'verify-ca', 'verify-full'].includes(sslmode) &&
+    [...uri.searchParams.keys()].every(key => key === 'sslmode') && !uri.hash,
+    'Database URI does not match the expected Supabase configuration'
+  );
 
   const result = run('psql', [
     '-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=verbose',

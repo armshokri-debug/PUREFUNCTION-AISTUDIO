@@ -10,8 +10,6 @@
 name: Supabase Encrypted Backup (Disabled Until Approved)
 
 on:
-  push:
-    branches: [qa/backup-connectivity-diagnostic]
   # Intentionally commented out until configuration, approval, and first verified backup:
   # schedule:
   #   - cron: '0 9 * * *' # Daily 09:00 UTC
@@ -81,7 +79,7 @@ jobs:
         run: node scripts/backup/run-backup.cjs --validate-only
 
   check-backup-connectivity:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'connectivity-only' || github.event_name == 'push' && github.ref == 'refs/heads/qa/backup-connectivity-diagnostic' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'connectivity-only' }}
     permissions:
       contents: read
     runs-on: ubuntu-24.04
