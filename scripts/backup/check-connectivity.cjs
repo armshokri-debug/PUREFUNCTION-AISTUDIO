@@ -85,8 +85,24 @@ function postgresFailure(result, connected) {
 
 function checkPostgres(env, run) {
   const ref = env.SUPABASE_PROJECT_REF;
-  const uri = new URL(env.SUPABASE_DB_URL);
-  const user = decodeURIComponent(uri.username);
+  const raw = env.SUPABASE_DB_URL?.trim();
+  requireProbe(raw, 'Database URI secret is empty');
+  requireProbe(/^postgres(?:ql)?:\/\//i.test(raw), 'Database secret must contain the PostgreSQL URI only');
+  let uri;
+  try {
+    uri = new URL(raw);
+  } catch {
+    throw new ProbeFailure('Database URI is malformed; check percent-encoding of reserved password characters');
+  }
+  let user, password;
+  try {
+    user = decodeURIComponent(uri.username);
+    password = decodeURIComponent(uri.password);
+  } catch {
+    throw new ProbeFailure('Database URI contains invalid percent-encoding');
+  }
+  requireProbe(password && !/^\[YOUR-(?:DATABASE-)?PASSWORD\]$/i.test(password), 'Database URI has no password or still contains the password placeholder');
+  requireProbe(!password.includes('\0') && !user.includes('\0'), 'Database URI contains an invalid encoded character');
   const direct = uri.hostname === `db.${ref}.supabase.co`;
   const pooler = /^[a-z0-9-]+\.pooler\.supabase\.com$/.test(uri.hostname) && user.endsWith(`.${ref}`);
   const sslmode = uri.searchParams.get('sslmode');
@@ -111,7 +127,7 @@ function checkPostgres(env, run) {
       PGPORT: '5432',
       PGDATABASE: 'postgres',
       PGUSER: user,
-      PGPASSWORD: decodeURIComponent(uri.password),
+      PGPASSWORD: password,
       PGSSLMODE: sslmode,
       PGCONNECT_TIMEOUT: '10',
       LC_ALL: 'C'

@@ -104,3 +104,12 @@ test('classifies a PostgreSQL authentication failure without exposing its diagno
   assert.ok(inputs.log.includes('FAIL PostgreSQL: PostgreSQL authentication rejected the configured credentials'));
   assert.ok(!inputs.log.join('\n').includes('private-name'));
 });
+
+test('reports malformed database URLs without logging the URL', async () => {
+  const inputs = fixture();
+  const invalid = 'postgresql://someone:private%K1@aws-0-test.pooler.supabase.com:5432/postgres?sslmode=require';
+  assert.equal(await runConnectivity({ ...inputs, log: inputs.logLine, env: { ...env, SUPABASE_DB_URL: invalid } }), false);
+  assert.ok(inputs.log.includes('FAIL PostgreSQL: Database URI contains invalid percent-encoding'));
+  assert.ok(!inputs.log.join('\n').includes('private%K1'));
+  assert.ok(!inputs.calls.some(([method]) => method === 'postgres'));
+});
