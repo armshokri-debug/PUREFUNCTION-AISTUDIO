@@ -1,0 +1,170 @@
+# DISABLED BY DEFAULT until owner approval, secret configuration, and isolated validation.
+#
+# Activation checklist (see docs/BACKUP_AND_RECOVERY.md):
+# 1. Provision a private external S3-compatible bucket (recommended: Cloudflare R2 free tier).
+# 2. Configure the required GitHub Repository Secrets & Variables listed in docs/BACKUP_AND_RECOVERY.md.
+# 3. Keep ENABLE_SUPABASE_BACKUP=false and run a manual "validate-only" check first.
+# 4. Set repository variable ENABLE_SUPABASE_BACKUP=true only when ready for the first supervised backup.
+# 5. Uncomment the `schedule:` block below ONLY after a real backup + isolated restore drill succeed.
+
+name: Supabase Encrypted Backup (Disabled Until Approved)
+
+on:
+  # Intentionally commented out until configuration, approval, and first verified backup:
+  # schedule:
+  #   - cron: '0 9 * * *' # Daily 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode (use validate-only until secrets are configured and approved)'
+        required: true
+        default: 'validate-only'
+        type: choice
+        options:
+          - validate-only
+          - live-backup
+      confirm_live_backup:
+        description: 'Type RUN_BACKUP only when running an approved live-backup'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: supabase-encrypted-backup
+  cancel-in-progress: false
+
+jobs:
+  # Safe non-destructive validation job (no database, Storage, or S3 calls)
+  validate-backup-tooling:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'validate-only' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - name: Run non-destructive backup unit & safety tests
+        run: npx vitest run scripts/backup/backup.test.mjs
+      - name: Verify configured backup secrets/variables without touching production
+        env:
+          ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_REGION: ${{ vars.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS }}
+          BACKUP_MIN_KEEP_COUNT: ${{ vars.BACKUP_MIN_KEEP_COUNT }}
+        run: node scripts/backup/run-backup.cjs --validate-only
+
+  # Live read-only encrypted backup job — gated behind BOTH vars.ENABLE_SUPABASE_BACKUP == 'true'
+  # AND explicit manual confirmation (or future approved schedule).
+  run-encrypted-backup:
+    if: >-
+      vars.ENABLE_SUPABASE_BACKUP == 'true' &&
+      (
+        github.event_name == 'schedule' ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          inputs.mode == 'live-backup' &&
+          inputs.confirm_live_backup == 'RUN_BACKUP'
+        )
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install PostgreSQL 17 client tools (read-only pg_dump / psql)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          pg_dump --version
+
+      - name: Execute read-only encrypted backup to external S3-compatible bucket
+        id: backup
+        env:
+          ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_REGION: ${{ vars.BACKUP_S3_REGION }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS }}
+          BACKUP_MIN_KEEP_COUNT: ${{ vars.BACKUP_MIN_KEEP_COUNT }}
+        run: node scripts/backup/run-backup.cjs --confirm-live
+
+      - name: Report backup failure via GitHub Issue (zero secrets, zero PII)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = '[Backup Alert] Supabase encrypted backup failed';
+            const body = [
+              'The automated Pure Function Supabase backup workflow failed.',
+              '',
+              `- Workflow run: ${runUrl}`,
+              `- Trigger: \`${context.eventName}\``,
+              `- Timestamp (UTC): ${new Date().toISOString()}`,
+              '',
+              'Review the workflow logs in GitHub Actions. No secrets or private client data are included in this alert.'
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'backup-alert',
+              per_page: 5
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['backup-alert']
+              });
+            }
