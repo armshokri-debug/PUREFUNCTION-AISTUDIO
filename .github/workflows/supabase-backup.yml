@@ -25,6 +25,7 @@ on:
           - connectivity-only
           - first-drive-preflight
           - first-drive-backup
+          - verify-first-drive-restore
           - live-backup
       confirm_live_backup:
         description: 'Type RUN_BACKUP for live-backup or FIRST_DRIVE_BACKUP for the approved first upload'
@@ -41,6 +42,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-first-drive-restore:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'verify-first-drive-restore' && vars.ENABLE_SUPABASE_BACKUP == 'false' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify the first Drive backup without persisting decrypted data
+        env:
+          ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_GDRIVE_CLIENT_ID: ${{ secrets.BACKUP_GDRIVE_CLIENT_ID }}
+          BACKUP_GDRIVE_CLIENT_SECRET: ${{ secrets.BACKUP_GDRIVE_CLIENT_SECRET }}
+          BACKUP_GDRIVE_REFRESH_TOKEN: ${{ secrets.BACKUP_GDRIVE_REFRESH_TOKEN }}
+          BACKUP_GDRIVE_FOLDER_ID: ${{ vars.BACKUP_GDRIVE_FOLDER_ID }}
+        run: node scripts/backup/verify-first-drive-restore.cjs
+
   # Safe non-destructive validation job (no database, Storage, or S3 calls)
   validate-backup-tooling:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'validate-only' }}
