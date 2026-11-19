@@ -282,3 +282,244 @@ describe('CLI dry-run, live-execution lock, and disabled-by-default workflow inv
     expect(out).toContain('PASS: Verified');
   });
 });
+
+const {
+  exchangeRefreshToken,
+  ensureBackupFolder,
+  uploadFileResumable,
+  uploadAndPruneGDrive
+} = require('./gdrive-storage.cjs');
+
+const VALID_GDRIVE_ENV = {
+  ENABLE_SUPABASE_BACKUP: 'false',
+  BACKUP_STORAGE_PROVIDER: 'gdrive',
+  SUPABASE_PROJECT_REF: 'rugwzvztweiffprkxfdc',
+  SUPABASE_DB_URL: 'postgresql://postgres:super-secret-db-pass@db.rugwzvztweiffprkxfdc.supabase.co:5432/postgres?sslmode=require',
+  SUPABASE_URL: 'https://rugwzvztweiffprkxfdc.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.signaturevalue123456',
+  BACKUP_ENCRYPTION_KEY: 'A9f!k2Lm#8qPx7Vz@4nRt6Yw$1cBh5JdE3gM',
+  BACKUP_GDRIVE_CLIENT_ID: '1234567890-abcdef.apps.googleusercontent.com',
+  BACKUP_GDRIVE_CLIENT_SECRET: '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cret',
+  BACKUP_GDRIVE_REFRESH_TOKEN: '1//0gSuperSecretRefreshTokenValue1234567890',
+  BACKUP_GDRIVE_FOLDER_NAME: 'PureFunction-Encrypted-Backups',
+  BACKUP_RETENTION_DAYS: '30',
+  BACKUP_MIN_KEEP_COUNT: '7'
+};
+
+describe('Google Drive backup destination (config, OAuth, resumable upload, retention)', () => {
+  it('validates Google Drive config without requiring S3 variables and rejects invalid inputs', () => {
+    const okRes = validateBackupConfig(VALID_GDRIVE_ENV);
+    expect(okRes.ok).toBe(true);
+    expect(okRes.config.provider).toBe('gdrive');
+    expect(okRes.config.gdriveFolderName).toBe('PureFunction-Encrypted-Backups');
+    expect(okRes.config.enabled).toBe(false);
+
+    const badRes = validateBackupConfig({
+      ...VALID_GDRIVE_ENV,
+      BACKUP_GDRIVE_CLIENT_ID: 'not-a-google-client-id',
+      BACKUP_GDRIVE_REFRESH_TOKEN: '',
+      BACKUP_GDRIVE_FOLDER_ID: '../bad/id'
+    });
+    expect(badRes.ok).toBe(false);
+    expect(badRes.errors.some((e) => e.includes('BACKUP_GDRIVE_CLIENT_ID'))).toBe(true);
+    expect(badRes.errors.some((e) => e.includes('BACKUP_GDRIVE_REFRESH_TOKEN'))).toBe(true);
+    expect(badRes.errors.some((e) => e.includes('BACKUP_GDRIVE_FOLDER_ID'))).toBe(true);
+
+    const badProvider = validateBackupConfig({ ...VALID_GDRIVE_ENV, BACKUP_STORAGE_PROVIDER: 'ftp' });
+    expect(badProvider.ok).toBe(false);
+    expect(badProvider.errors.some((e) => e.includes('BACKUP_STORAGE_PROVIDER'))).toBe(true);
+  });
+
+  it('redacts Google OAuth access tokens (ya29.*) and refresh tokens (1//*) from error output', () => {
+    const raw =
+      'Token ya29.a0AfH6SMBxFakeAccessToken1234567890 and refresh 1//0gFakeRefreshTokenValue1234567890 with secret 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cret';
+    const safe = redactSecrets(raw, [VALID_GDRIVE_ENV.BACKUP_GDRIVE_CLIENT_SECRET]);
+    expect(safe).not.toContain('ya29.a0AfH6');
+    expect(safe).not.toContain('1//0gFakeRefresh');
+    expect(safe).not.toContain('GOCSPX-super-secret');
+  });
+
+  it('exchanges refresh token and surfaces clear In Production guidance on invalid_grant', async () => {
+    const okFetch = async () =>
+      new Response(JSON.stringify({ access_token: 'ya29.mockAccessToken1234567890' }), { status: 200 });
+    const token = await exchangeRefreshToken({
+      clientId: VALID_GDRIVE_ENV.BACKUP_GDRIVE_CLIENT_ID,
+      clientSecret: VALID_GDRIVE_ENV.BACKUP_GDRIVE_CLIENT_SECRET,
+      refreshToken: VALID_GDRIVE_ENV.BACKUP_GDRIVE_REFRESH_TOKEN,
+      fetchImpl: okFetch
+    });
+    expect(token).toBe('ya29.mockAccessToken1234567890');
+
+    const expiredFetch = async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 });
+    await expect(
+      exchangeRefreshToken({
+        clientId: VALID_GDRIVE_ENV.BACKUP_GDRIVE_CLIENT_ID,
+        clientSecret: VALID_GDRIVE_ENV.BACKUP_GDRIVE_CLIENT_SECRET,
+        refreshToken: VALID_GDRIVE_ENV.BACKUP_GDRIVE_REFRESH_TOKEN,
+        fetchImpl: expiredFetch
+      })
+    ).rejects.toThrow(/In Production/i);
+  });
+
+  it('explains drive.file scope limitation if an inaccessible manually-created folder ID is supplied', async () => {
+    const mockFetch = async () => new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
+    await expect(
+      ensureBackupFolder({
+        accessToken: 'ya29.mock',
+        folderId: '1AbCdEfGhIjKlMnOpQrStUvWxYz',
+        folderName: 'PureFunction-Encrypted-Backups',
+        fetchImpl: mockFetch
+      })
+    ).rejects.toThrow(/drive\.file/i);
+  });
+
+  it('uploads multi-chunk files via Google Drive resumable upload and reassembles exact bytes', async () => {
+    const dir = makeTmpDir();
+    const filePath = path.join(dir, 'large.tar.gz.enc');
+    const payload = crypto.randomBytes(600 * 1024); // > 2 chunks of 256 KiB
+    fs.writeFileSync(filePath, payload);
+
+    const receivedChunks = [];
+    const mockFetch = async (url, opts = {}) => {
+      if (url.includes('uploadType=resumable')) {
+        return new Response(null, {
+          status: 200,
+          headers: { location: 'https://www.googleapis.com/upload/drive/v3/files?upload_id=session-123' }
+        });
+      }
+      if (url.includes('upload_id=session-123') && opts.method === 'PUT') {
+        const buf = Buffer.from(opts.body);
+        receivedChunks.push(buf);
+        const range = opts.headers['Content-Range'];
+        const [, endStr, totalStr] = range.match(/bytes \d+-(\d+)\/(\d+)/);
+        if (Number(endStr) + 1 < Number(totalStr)) {
+          return new Response(null, { status: 308 });
+        }
+        return new Response(
+          JSON.stringify({ id: 'file-resumable-1', name: 'large.tar.gz.enc', size: String(payload.length) }),
+          { status: 200 }
+        );
+      }
+      return new Response('unexpected', { status: 500 });
+    };
+
+    const uploaded = await uploadFileResumable({
+      accessToken: 'ya29.mock',
+      folderId: 'folder-123',
+      filePath,
+      fileName: 'large.tar.gz.enc',
+      chunkSizeBytes: 256 * 1024,
+      fetchImpl: mockFetch
+    });
+
+    expect(uploaded.id).toBe('file-resumable-1');
+    expect(receivedChunks.length).toBe(3);
+    expect(Buffer.concat(receivedChunks).equals(payload)).toBe(true);
+  });
+
+  it('runs end-to-end mocked Google Drive upload and retention pruning preserving 7 newest backups', async () => {
+    const dir = makeTmpDir();
+    const encPath = path.join(dir, 'backup-2026-11-18T12-00-00Z.tar.gz.enc');
+    const manifestPath = path.join(dir, 'backup-2026-11-18T12-00-00Z.manifest.json');
+    fs.writeFileSync(encPath, crypto.randomBytes(1024));
+    fs.writeFileSync(manifestPath, JSON.stringify({ formatVersion: 1 }));
+
+    const now = new Date('2026-11-18T12:00:00Z');
+    const existingFiles = [
+      { id: 'keep-notes', name: 'README.txt', modifiedTime: '2020-01-01T00:00:00Z' }
+    ];
+    for (let i = 0; i < 9; i++) {
+      const d = new Date(now.getTime() - (35 + i) * 86400_000);
+      const stamp = d.toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z');
+      existingFiles.push({ id: `enc-${i}`, name: `backup-${stamp}.tar.gz.enc`, modifiedTime: d.toISOString() });
+      existingFiles.push({ id: `man-${i}`, name: `backup-${stamp}.manifest.json`, modifiedTime: d.toISOString() });
+    }
+
+    const deletedIds = [];
+    const createdFolders = [];
+    const mockFetch = async (url, opts = {}) => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return new Response(JSON.stringify({ access_token: 'ya29.mockToken1234567890' }), { status: 200 });
+      }
+      if (url.startsWith('https://www.googleapis.com/drive/v3/files?q=') && url.includes('mimeType')) {
+        return new Response(JSON.stringify({ files: [] }), { status: 200 });
+      }
+      if (url === 'https://www.googleapis.com/drive/v3/files?fields=id,name' && opts.method === 'POST') {
+        const meta = JSON.parse(opts.body);
+        createdFolders.push(meta.name);
+        return new Response(JSON.stringify({ id: 'folder-created-1', name: meta.name }), { status: 200 });
+      }
+      if (url.includes('uploadType=resumable')) {
+        const meta = JSON.parse(opts.body);
+        return new Response(null, {
+          status: 200,
+          headers: { location: `https://upload.mock/${encodeURIComponent(meta.name)}` }
+        });
+      }
+      if (url.startsWith('https://upload.mock/') && opts.method === 'PUT') {
+        const name = decodeURIComponent(url.replace('https://upload.mock/', ''));
+        const id = `new-${name}`;
+        existingFiles.push({ id, name, modifiedTime: now.toISOString() });
+        return new Response(JSON.stringify({ id, name, size: String(opts.body.length) }), { status: 200 });
+      }
+      if (url.startsWith('https://www.googleapis.com/drive/v3/files?q=') && url.includes('in+parents')) {
+        return new Response(JSON.stringify({ files: existingFiles }), { status: 200 });
+      }
+      if (opts.method === 'DELETE' && url.startsWith('https://www.googleapis.com/drive/v3/files/')) {
+        deletedIds.push(url.split('/').pop());
+        return new Response(null, { status: 204 });
+      }
+      return new Response(`unhandled ${opts.method} ${url}`, { status: 500 });
+    };
+
+    const cfg = validateBackupConfig(VALID_GDRIVE_ENV).config;
+    const res = await uploadAndPruneGDrive({
+      config: cfg,
+      encPath,
+      manifestPath,
+      baseName: 'backup-2026-11-18T12-00-00Z',
+      now,
+      fetchImpl: mockFetch
+    });
+
+    expect(createdFolders).toEqual(['PureFunction-Encrypted-Backups']);
+    expect(res.folderId).toBe('folder-created-1');
+    // 10 total backups (1 new + 9 aged 35..43d); safety floor keeps 7 newest -> 3 oldest pairs (6 files) pruned
+    expect(res.prunedCount).toBe(6);
+    expect(deletedIds).not.toContain('keep-notes');
+    expect(deletedIds).toContain('enc-8');
+    expect(deletedIds).toContain('man-8');
+  });
+
+  it('passes CLI --validate-only for gdrive provider and keeps workflow wired & disabled by default', () => {
+    const scriptPath = path.resolve(process.cwd(), 'scripts/backup/run-backup.cjs');
+    const out = execFileSync(process.execPath, [scriptPath, '--validate-only'], {
+      env: { ...process.env, ...VALID_GDRIVE_ENV },
+      encoding: 'utf8'
+    });
+    expect(out).toContain('provider=gdrive');
+    expect(out).toContain('PASS: Backup configuration');
+
+    let exitCode = 0;
+    try {
+      execFileSync(process.execPath, [scriptPath, '--confirm-live'], {
+        env: { ...process.env, ...VALID_GDRIVE_ENV, ENABLE_SUPABASE_BACKUP: 'false' },
+        encoding: 'utf8',
+        stdio: 'pipe'
+      });
+    } catch (err) {
+      exitCode = err.status;
+    }
+    expect(exitCode).toBe(2);
+
+    const wfPath = path.resolve(process.cwd(), '.github/workflows/supabase-backup.yml');
+    const yaml = fs.readFileSync(wfPath, 'utf8');
+    expect(yaml).toContain('BACKUP_STORAGE_PROVIDER');
+    expect(yaml).toContain('BACKUP_GDRIVE_CLIENT_ID');
+    expect(yaml).toContain('BACKUP_GDRIVE_CLIENT_SECRET');
+    expect(yaml).toContain('BACKUP_GDRIVE_REFRESH_TOKEN');
+    expect(yaml).toContain('BACKUP_S3_BUCKET');
+    expect(/^\s*schedule\s*:/m.test(yaml)).toBe(false);
+  });
+});

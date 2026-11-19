@@ -49,40 +49,83 @@ Backup coverage must **not** be considered complete until external storage and s
 
 ---
 
-## 3. Recommended Low-Cost External Storage Provider
+## 3. Supported External Storage Destinations
 
-**Recommended:** **Cloudflare R2** (S3-compatible)
-- **Cost:** Free tier includes **10 GB/month storage** and **$0 egress fees** (downloads for verification/restore drills are free).
-- **Security setup:**
-  1. Create a **private** bucket (e.g. `purefunction-prod-backups`) with public access disabled.
-  2. Create a scoped R2 API Token with **Object Read & Write** permissions limited **only** to that single bucket.
-  3. (Optional extra hardening) Enable Bucket Versioning or Object Lock if desired.
+The backup system supports two external storage destinations via `BACKUP_STORAGE_PROVIDER`:
+- **`gdrive`** — **Google Drive (Personal Gmail, Free 15 GB, No Payment Card Required)**
+- **`s3`** — **S3-Compatible Object Storage (Cloudflare R2 / Backblaze B2 / AWS S3)**
 
-**Alternatives supported without code changes:** Backblaze B2 (S3-compatible API) or AWS S3.
+### Option A — Google Drive with Personal Gmail (`BACKUP_STORAGE_PROVIDER=gdrive`)
+
+#### Why OAuth 2.0 Refresh Token (and NOT a Service Account)?
+- Google Cloud Service Accounts have **0 bytes of Drive storage quota** on personal Gmail accounts (`storageQuotaExceeded`), so Service Accounts cannot upload files to a personal My Drive folder.
+- Instead, this backup system uses an **OAuth 2.0 Refresh Token** scoped strictly to **`https://www.googleapis.com/auth/drive.file`** (least privilege: the backup runner can **only** see, upload, and prune files/folders created by this backup app — it can **never** read or modify any of your other personal Drive files).
+- Large archives (> 5 MB, including videos) are uploaded via **Google Drive v3 Resumable Uploads** in 8 MiB chunks.
+
+#### Critical Setup Requirements for Unattended GitHub Actions
+1. **No payment card required:** Create a free Google Cloud project at `https://console.cloud.google.com/` and enable **Google Drive API**.
+2. **OAuth Consent Screen (`In Production` is REQUIRED):**
+   - Go to **APIs & Services → OAuth consent screen**.
+   - Choose User Type **External**, fill in an app name (e.g. `PureFunction Backup`) and your email.
+   - Add scope `https://www.googleapis.com/auth/drive.file` (non-sensitive scope).
+   - **CRITICAL:** Click **Publish App** to switch Publishing Status from `Testing` to **`In Production`**.
+     - *Why:* Refresh tokens issued while an app is in `Testing` mode **automatically expire after 7 days**, which breaks unattended backups. Switching to `In Production` for personal use does **not** require Google verification — during the one-time authorization, click **Advanced → Go to PureFunction Backup (unsafe)** to approve your own app.
+3. **Create OAuth 2.0 Client ID:**
+   - Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+   - Choose **Web application**, add `https://developers.google.com/oauthplayground` as an **Authorized redirect URI**, and copy the **Client ID** and **Client Secret**.
+4. **Generate your Refresh Token once (via Google OAuth 2.0 Playground):**
+   - Open `https://developers.google.com/oauthplayground`.
+   - Click the gear icon (⚙️) → check **Use your own OAuth credentials** → paste your Client ID and Client Secret.
+   - In Step 1, enter `https://www.googleapis.com/auth/drive.file` and click **Authorize APIs** using your personal Gmail account (click **Advanced → Continue** on the personal unverified app screen).
+   - In Step 2, click **Exchange authorization code for tokens** and copy the **`Refresh token`** (starts with `1//...`).
+5. **Important note about `PureFunction-Encrypted-Backups` folder ownership:**
+   - Under the least-privilege `drive.file` scope, Google Drive API **cannot** write into a folder created manually in the Drive web UI (Google returns `404 Not Found` because the app did not create that folder).
+   - **Recommended:** Delete or rename your empty manually-created `PureFunction-Encrypted-Backups` folder in Google Drive, and leave `BACKUP_GDRIVE_FOLDER_ID` **empty** with `BACKUP_GDRIVE_FOLDER_NAME=PureFunction-Encrypted-Backups`. On the first approved live backup, the script automatically creates `PureFunction-Encrypted-Backups` (owned by the app under your Drive) and reuses it on every future run.
+
+### Option B — S3-Compatible Bucket (`BACKUP_STORAGE_PROVIDER=s3`)
+
+- **Cloudflare R2** (10 GB/month free tier, $0 egress; requires card on file), **Backblaze B2**, or **AWS S3**.
+- Create a **private** bucket (e.g. `purefunction-prod-backups`) with public access disabled and a bucket-scoped Read/Write key.
 
 ---
 
 ## 4. Credentials, Secrets & Variables Requiring Owner Approval Before Activation
 
-Configure these in **GitHub → `armshokri-debug/PUREFUNCTION-AISTUDIO` → Settings → Secrets and variables → Actions** only after you approve the storage provider.
+Configure these in **GitHub → `armshokri-debug/PUREFUNCTION-AISTUDIO` → Settings → Secrets and variables → Actions** only after you approve activation.
 
-### Repository Secrets (sensitive — never commit to repo or `.env*`)
+### Common Repository Secrets (Required for BOTH Google Drive and S3)
 | Secret Name | Value / Purpose |
 | --- | --- |
-| `SUPABASE_DB_URL` | PostgreSQL Direct or Session Pooler URI for `rugwzvztweiffprkxfdc` ending with `?sslmode=require`. (Tip: if GitHub Actions runner uses IPv4, use the Supabase **Session Pooler** URI port `5432` with `?sslmode=require`.) |
+| `SUPABASE_DB_URL` | PostgreSQL Direct or Session Pooler URI for `rugwzvztweiffprkxfdc` ending with `?sslmode=require`. (Tip: for IPv4 GitHub Actions runners, use Supabase **Session Pooler** port `5432` with `?sslmode=require`.) |
 | `SUPABASE_URL` | `https://rugwzvztweiffprkxfdc.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key — used **only** inside the private Actions runner for read-only Storage export. **Never** put in `VITE_*` variables. |
 | `BACKUP_ENCRYPTION_KEY` | Random high-entropy passphrase (at least 32 characters, e.g. `openssl rand -base64 48`). **Save a copy offline in your password manager.** |
-| `BACKUP_S3_ENDPOINT` | External S3 endpoint URL (for Cloudflare R2: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`). |
+
+### Provider-Specific Repository Secrets
+
+#### If using Google Drive (`BACKUP_STORAGE_PROVIDER=gdrive`):
+| Secret Name | Value / Purpose |
+| --- | --- |
+| `BACKUP_GDRIVE_CLIENT_ID` | Google OAuth Client ID (`*.apps.googleusercontent.com`). |
+| `BACKUP_GDRIVE_CLIENT_SECRET` | Google OAuth Client Secret. |
+| `BACKUP_GDRIVE_REFRESH_TOKEN` | Long-lived OAuth Refresh Token (`1//...`) issued with `drive.file` scope while Consent Screen is `In Production`. |
+
+#### If using S3 / R2 / B2 (`BACKUP_STORAGE_PROVIDER=s3`):
+| Secret Name | Value / Purpose |
+| --- | --- |
+| `BACKUP_S3_ENDPOINT` | External S3 endpoint URL (e.g. `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`). |
 | `BACKUP_S3_BUCKET` | Private external bucket name (e.g. `purefunction-prod-backups`). |
 | `BACKUP_S3_ACCESS_KEY_ID` | Bucket-scoped S3/R2 access key ID. |
 | `BACKUP_S3_SECRET_ACCESS_KEY` | Bucket-scoped S3/R2 secret access key. |
 
 ### Repository Variables (non-secret configuration)
-| Variable Name | Initial Value | Purpose |
+| Variable Name | Recommended Value | Purpose |
 | --- | --- | --- |
+| `BACKUP_STORAGE_PROVIDER` | `gdrive` (or `s3`) | Selects Google Drive or S3/R2 upload backend. |
 | `SUPABASE_PROJECT_REF` | `rugwzvztweiffprkxfdc` | Safety guard matching `SUPABASE_URL` hostname. |
-| `BACKUP_S3_REGION` | `auto` | `auto` for Cloudflare R2 (or bucket region for B2/AWS S3). |
+| `BACKUP_GDRIVE_FOLDER_NAME` | `PureFunction-Encrypted-Backups` | Target folder name in Google Drive (used when `BACKUP_GDRIVE_FOLDER_ID` is empty). |
+| `BACKUP_GDRIVE_FOLDER_ID` | *(leave empty initially)* | Optional explicit ID of an app-created Drive folder. |
+| `BACKUP_S3_REGION` | `auto` | Only needed for `s3` provider (`auto` for Cloudflare R2). |
 | `BACKUP_RETENTION_DAYS` | `30` | Days to retain backups (minimum 7). |
 | `BACKUP_MIN_KEEP_COUNT` | `7` | Safety floor: minimum newest backups always preserved. |
 | `ENABLE_SUPABASE_BACKUP` | `false` | Master kill-switch. Keep `false` until approved and validated. |
@@ -122,7 +165,9 @@ This verifies:
 
 ### Step 1 — Download and decrypt the backup locally on a trusted private machine
 ```bash
-# Download from Cloudflare R2 / S3 using aws CLI (--endpoint-url ...)
+# Download the matching .tar.gz.enc and .manifest.json files from:
+# - Google Drive: private folder "PureFunction-Encrypted-Backups" (via Drive web UI), OR
+# - Cloudflare R2 / S3: using aws CLI (--endpoint-url ...)
 export BACKUP_ENCRYPTION_KEY="<passphrase-from-password-manager>"
 mkdir -p ./restore-drill && chmod 700 ./restore-drill
 node scripts/backup/verify-and-decrypt.cjs \
@@ -175,6 +220,6 @@ pg_restore --dbname="$RECOVERY_DB_URL" --data-only --disable-triggers --no-owner
 
 1. Confirm the `validate-only` workflow run passes.
 2. Set GitHub Repository Variable `ENABLE_SUPABASE_BACKUP` to `true`.
-3. Run one manual `live-backup` (entering `RUN_BACKUP`) and verify the encrypted archive appears in your external bucket.
+3. Run one manual `live-backup` (entering `RUN_BACKUP`) and verify both the encrypted `.tar.gz.enc` archive and `.manifest.json` appear in your Google Drive `PureFunction-Encrypted-Backups` folder (or external S3/R2 bucket).
 4. Download that encrypted archive and run `verify-and-decrypt.cjs` locally (and perform an isolated restore drill on a separate test Supabase project).
 5. Only then uncomment the `schedule:` block in `.github/workflows/supabase-backup.yml` so daily backups run automatically.

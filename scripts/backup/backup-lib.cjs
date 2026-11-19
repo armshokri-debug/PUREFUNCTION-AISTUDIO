@@ -27,29 +27,54 @@ const EXPECTED_SCHEMAS = [
   'supabase_migrations'
 ];
 
-const REQUIRED_ENV_KEYS = [
+const VALID_PROVIDERS = ['s3', 'gdrive'];
+
+const COMMON_REQUIRED_ENV_KEYS = [
   'SUPABASE_PROJECT_REF',
   'SUPABASE_DB_URL',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'BACKUP_ENCRYPTION_KEY',
+  'BACKUP_ENCRYPTION_KEY'
+];
+
+const S3_REQUIRED_ENV_KEYS = [
   'BACKUP_S3_ENDPOINT',
   'BACKUP_S3_BUCKET',
   'BACKUP_S3_ACCESS_KEY_ID',
   'BACKUP_S3_SECRET_ACCESS_KEY'
 ];
 
+const GDRIVE_REQUIRED_ENV_KEYS = [
+  'BACKUP_GDRIVE_CLIENT_ID',
+  'BACKUP_GDRIVE_CLIENT_SECRET',
+  'BACKUP_GDRIVE_REFRESH_TOKEN'
+];
+
+// Backwards-compatible list for default S3 provider
+const REQUIRED_ENV_KEYS = [...COMMON_REQUIRED_ENV_KEYS, ...S3_REQUIRED_ENV_KEYS];
+
 const PLACEHOLDER_PATTERN = /^(changeme|placeholder|example|replace[-_ ]?me|your[-_ ]|test[-_ ]?key|xxx+)$/i;
 
 /**
  * Validates backup configuration strictly without touching any network or database.
+ * Supports BACKUP_STORAGE_PROVIDER=s3 (default) or BACKUP_STORAGE_PROVIDER=gdrive.
  * Returns { ok, errors, warnings, config }.
  */
 function validateBackupConfig(env = process.env) {
   const errors = [];
   const warnings = [];
 
-  for (const key of REQUIRED_ENV_KEYS) {
+  const provider = (env.BACKUP_STORAGE_PROVIDER || 's3').trim().toLowerCase();
+  if (!VALID_PROVIDERS.includes(provider)) {
+    errors.push(`BACKUP_STORAGE_PROVIDER must be one of: ${VALID_PROVIDERS.join(', ')} (got "${provider}").`);
+  }
+
+  const requiredKeys = [
+    ...COMMON_REQUIRED_ENV_KEYS,
+    ...(provider === 'gdrive' ? GDRIVE_REQUIRED_ENV_KEYS : S3_REQUIRED_ENV_KEYS)
+  ];
+
+  for (const key of requiredKeys) {
     const val = (env[key] || '').trim();
     if (!val) {
       errors.push(`Missing required environment variable: ${key}`);
@@ -100,20 +125,39 @@ function validateBackupConfig(env = process.env) {
   }
 
   const s3Endpoint = (env.BACKUP_S3_ENDPOINT || '').trim();
-  if (s3Endpoint) {
-    try {
-      const parsed = new URL(s3Endpoint);
-      if (parsed.protocol !== 'https:') {
-        errors.push('BACKUP_S3_ENDPOINT must use https://.');
+  const s3Bucket = (env.BACKUP_S3_BUCKET || '').trim();
+  if (provider === 's3') {
+    if (s3Endpoint) {
+      try {
+        const parsed = new URL(s3Endpoint);
+        if (parsed.protocol !== 'https:') {
+          errors.push('BACKUP_S3_ENDPOINT must use https://.');
+        }
+      } catch {
+        errors.push('BACKUP_S3_ENDPOINT is not a valid URL.');
       }
-    } catch {
-      errors.push('BACKUP_S3_ENDPOINT is not a valid URL.');
+    }
+    if (s3Bucket && !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(s3Bucket)) {
+      errors.push('BACKUP_S3_BUCKET must be a valid lowercase S3 bucket name.');
     }
   }
 
-  const s3Bucket = (env.BACKUP_S3_BUCKET || '').trim();
-  if (s3Bucket && !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(s3Bucket)) {
-    errors.push('BACKUP_S3_BUCKET must be a valid lowercase S3 bucket name.');
+  const gdriveClientId = (env.BACKUP_GDRIVE_CLIENT_ID || '').trim();
+  const gdriveClientSecret = (env.BACKUP_GDRIVE_CLIENT_SECRET || '').trim();
+  const gdriveRefreshToken = (env.BACKUP_GDRIVE_REFRESH_TOKEN || '').trim();
+  const gdriveFolderId = (env.BACKUP_GDRIVE_FOLDER_ID || '').trim();
+  const gdriveFolderName = (env.BACKUP_GDRIVE_FOLDER_NAME || 'PureFunction-Encrypted-Backups').trim();
+
+  if (provider === 'gdrive') {
+    if (gdriveClientId && !gdriveClientId.endsWith('.apps.googleusercontent.com')) {
+      errors.push('BACKUP_GDRIVE_CLIENT_ID must be a valid Google OAuth Client ID (*.apps.googleusercontent.com).');
+    }
+    if (gdriveFolderId && !/^[A-Za-z0-9_-]{10,120}$/.test(gdriveFolderId)) {
+      errors.push('BACKUP_GDRIVE_FOLDER_ID must be a valid Google Drive folder ID (alphanumeric, "_" or "-").');
+    }
+    if (!gdriveFolderName || /[/\\\0]/.test(gdriveFolderName)) {
+      errors.push('BACKUP_GDRIVE_FOLDER_NAME must be a safe folder name without slashes.');
+    }
   }
 
   const rawRetention = (env.BACKUP_RETENTION_DAYS || '30').trim();
@@ -140,6 +184,7 @@ function validateBackupConfig(env = process.env) {
     errors,
     warnings,
     config: {
+      provider: VALID_PROVIDERS.includes(provider) ? provider : 's3',
       projectRef,
       supabaseUrl: supabaseUrl.replace(/\/+$/, ''),
       dbUrl,
@@ -151,6 +196,11 @@ function validateBackupConfig(env = process.env) {
       s3Prefix,
       s3AccessKeyId: (env.BACKUP_S3_ACCESS_KEY_ID || '').trim(),
       s3SecretAccessKey: (env.BACKUP_S3_SECRET_ACCESS_KEY || '').trim(),
+      gdriveClientId,
+      gdriveClientSecret,
+      gdriveRefreshToken,
+      gdriveFolderId,
+      gdriveFolderName,
       retentionDays: Number.isInteger(retentionDays) ? retentionDays : 30,
       minKeepCount: Number.isInteger(minKeepCount) ? minKeepCount : 7,
       enabled: env.ENABLE_SUPABASE_BACKUP === 'true'
@@ -159,7 +209,7 @@ function validateBackupConfig(env = process.env) {
 }
 
 /**
- * Redacts all known secret values and URI credentials from log/alert text.
+ * Redacts all known secret values, URI credentials, JWTs, and Google OAuth tokens from log/alert text.
  */
 function redactSecrets(text, secrets = []) {
   let out = String(text ?? '');
@@ -172,6 +222,9 @@ function redactSecrets(text, secrets = []) {
   out = out.replace(/(postgres(?:ql)?:\/\/[^:\s/]+:)([^@\s]+)(@)/gi, '$1[REDACTED]$3');
   // Mask JWT-like bearer tokens
   out = out.replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]');
+  // Mask Google OAuth access tokens (ya29.*) and refresh tokens (1//*)
+  out = out.replace(/\bya29\.[A-Za-z0-9._-]{15,}\b/g, '[REDACTED_GOOGLE_TOKEN]');
+  out = out.replace(/\b1\/\/[A-Za-z0-9._-]{15,}\b/g, '[REDACTED_GOOGLE_REFRESH_TOKEN]');
   return out;
 }
 
@@ -371,7 +424,7 @@ async function decryptFile(inputPath, outputPath, passphrase) {
  * Expects objects: [{ key: string, lastModified: string | Date }]
  */
 function computeRetentionDeletions(objects, retentionDays = 30, now = new Date(), minKeepCount = 7) {
-  const backupRe = /backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.tar\.gz\.enc$/;
+  const backupRe = /(?:^|\/)backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.tar\.gz\.enc$/;
   const backups = objects
     .filter((obj) => obj && typeof obj.key === 'string' && backupRe.test(obj.key))
     .map((obj) => ({
@@ -423,7 +476,9 @@ function safeStorageFilePath(baseDir, bucketId, objectPath) {
 module.exports = {
   EXPECTED_BUCKETS,
   EXPECTED_SCHEMAS,
+  VALID_PROVIDERS,
   REQUIRED_ENV_KEYS,
+  GDRIVE_REQUIRED_ENV_KEYS,
   validateBackupConfig,
   redactSecrets,
   buildPgDumpPlan,

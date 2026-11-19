@@ -17,6 +17,7 @@ const {
   computeRetentionDeletions
 } = require('./backup-lib.cjs');
 const { exportSupabaseStorage } = require('./export-storage.cjs');
+const { uploadAndPruneGDrive } = require('./gdrive-storage.cjs');
 
 function runTool(cmd, args, opts = {}) {
   return execFileSync(cmd, args, {
@@ -92,7 +93,9 @@ async function main() {
     validation.config.serviceRoleKey,
     validation.config.encryptionKey,
     validation.config.s3AccessKeyId,
-    validation.config.s3SecretAccessKey
+    validation.config.s3SecretAccessKey,
+    validation.config.gdriveClientSecret,
+    validation.config.gdriveRefreshToken
   ];
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-backup-'));
@@ -108,11 +111,13 @@ async function main() {
 
     if (validateOnly) {
       await runSelfTest(workDir, validation.config.encryptionKey);
-      console.log('PASS: Backup configuration is valid and AES-256-GCM round-trip self-test succeeded.');
+      console.log(
+        `PASS: Backup configuration is valid (provider=${validation.config.provider}) and AES-256-GCM round-trip self-test succeeded.`
+      );
       for (const w of validation.warnings) {
         console.log(`NOTE: ${w}`);
       }
-      console.log('Dry-run complete. Zero database, Storage, or S3 operations were executed.');
+      console.log('Dry-run complete. Zero database, Storage, S3, or Google Drive operations were executed.');
       return;
     }
 
@@ -184,6 +189,7 @@ async function main() {
     const manifest = {
       formatVersion: 1,
       encryption: 'PFBK1-AES-256-GCM-SCRYPT',
+      storageProvider: cfg.provider,
       projectRef: cfg.projectRef,
       createdAt: new Date().toISOString(),
       archiveName: `${baseName}.tar.gz.enc`,
@@ -202,43 +208,58 @@ async function main() {
     const manifestPath = path.join(workDir, `${baseName}.manifest.json`);
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 });
 
-    // 5) Upload to external S3-compatible bucket (Cloudflare R2 / Backblaze B2 / AWS S3)
-    console.log('[5/6] Uploading encrypted archive and non-PII manifest to external bucket...');
-    const awsEnv = s3Env(cfg);
-    const s3Base = `s3://${cfg.s3Bucket}/${cfg.s3Prefix}`;
-    runTool('aws', ['s3', 'cp', encPath, `${s3Base}/${baseName}.tar.gz.enc`, '--endpoint-url', cfg.s3Endpoint, '--only-show-errors'], { env: awsEnv });
-    runTool('aws', ['s3', 'cp', manifestPath, `${s3Base}/${baseName}.manifest.json`, '--endpoint-url', cfg.s3Endpoint, '--only-show-errors'], { env: awsEnv });
+    // 5 & 6) Upload encrypted archive + non-PII manifest and prune expired backups
+    let prunedCount = 0;
+    if (cfg.provider === 'gdrive') {
+      console.log(`[5/6] Uploading encrypted archive to Google Drive folder "${cfg.gdriveFolderName}"...`);
+      console.log(`[6/6] Evaluating Google Drive retention policy (${cfg.retentionDays}d, minimum ${cfg.minKeepCount} backups kept)...`);
+      const gdriveRes = await uploadAndPruneGDrive({
+        config: cfg,
+        encPath,
+        manifestPath,
+        baseName
+      });
+      prunedCount = gdriveRes.prunedCount;
+      console.log(
+        `PASS: Encrypted backup ${baseName}.tar.gz.enc uploaded to Google Drive folder "${gdriveRes.folderName}" (${encBytes} bytes, ${storageSummary.objectCount} storage files). Pruned ${prunedCount} expired file(s).`
+      );
+    } else {
+      console.log('[5/6] Uploading encrypted archive and non-PII manifest to external S3-compatible bucket...');
+      const awsEnv = s3Env(cfg);
+      const s3Base = `s3://${cfg.s3Bucket}/${cfg.s3Prefix}`;
+      runTool('aws', ['s3', 'cp', encPath, `${s3Base}/${baseName}.tar.gz.enc`, '--endpoint-url', cfg.s3Endpoint, '--only-show-errors'], { env: awsEnv });
+      runTool('aws', ['s3', 'cp', manifestPath, `${s3Base}/${baseName}.manifest.json`, '--endpoint-url', cfg.s3Endpoint, '--only-show-errors'], { env: awsEnv });
 
-    // 6) Safe retention pruning (always preserves at least minKeepCount newest backups)
-    console.log(`[6/6] Evaluating retention policy (${cfg.retentionDays}d, minimum ${cfg.minKeepCount} backups kept)...`);
-    const listOut = runTool(
-      'aws',
-      [
-        's3api', 'list-objects-v2',
-        '--bucket', cfg.s3Bucket,
-        '--prefix', `${cfg.s3Prefix}/`,
-        '--endpoint-url', cfg.s3Endpoint,
-        '--output', 'json'
-      ],
-      { env: awsEnv }
-    );
-    const parsedList = JSON.parse(listOut || '{}');
-    const objects = (parsedList.Contents || []).map((o) => ({
-      key: o.Key,
-      lastModified: o.LastModified
-    }));
-    const deletions = computeRetentionDeletions(objects, cfg.retentionDays, new Date(), cfg.minKeepCount);
-    for (const key of deletions) {
-      runTool(
+      console.log(`[6/6] Evaluating S3 retention policy (${cfg.retentionDays}d, minimum ${cfg.minKeepCount} backups kept)...`);
+      const listOut = runTool(
         'aws',
-        ['s3api', 'delete-object', '--bucket', cfg.s3Bucket, '--key', key, '--endpoint-url', cfg.s3Endpoint],
+        [
+          's3api', 'list-objects-v2',
+          '--bucket', cfg.s3Bucket,
+          '--prefix', `${cfg.s3Prefix}/`,
+          '--endpoint-url', cfg.s3Endpoint,
+          '--output', 'json'
+        ],
         { env: awsEnv }
       );
+      const parsedList = JSON.parse(listOut || '{}');
+      const objects = (parsedList.Contents || []).map((o) => ({
+        key: o.Key,
+        lastModified: o.LastModified
+      }));
+      const deletions = computeRetentionDeletions(objects, cfg.retentionDays, new Date(), cfg.minKeepCount);
+      for (const key of deletions) {
+        runTool(
+          'aws',
+          ['s3api', 'delete-object', '--bucket', cfg.s3Bucket, '--key', key, '--endpoint-url', cfg.s3Endpoint],
+          { env: awsEnv }
+        );
+      }
+      prunedCount = deletions.length;
+      console.log(
+        `PASS: Encrypted backup ${baseName}.tar.gz.enc uploaded to S3 bucket (${encBytes} bytes, ${storageSummary.objectCount} storage files). Pruned ${prunedCount} expired file(s).`
+      );
     }
-
-    console.log(
-      `PASS: Encrypted backup ${baseName}.tar.gz.enc uploaded (${encBytes} bytes, ${storageSummary.objectCount} storage files). Pruned ${deletions.length} expired file(s).`
-    );
   } catch (err) {
     console.error('BACKUP FAILED:', redactSecrets(err && err.stack ? err.stack : String(err), secrets));
     process.exitCode = 1;
