@@ -1,12 +1,14 @@
 'use strict';
 
 const fs = require('fs');
-const { computeRetentionDeletions } = require('./backup-lib.cjs');
+const crypto = require('crypto');
+const { computeRetentionDeletions, sha256File } = require('./backup-lib.cjs');
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const BACKUP_FOLDER_NAME = 'PureFunction-Encrypted-Backups';
 // Must be a multiple of 256 KiB per Google Drive resumable upload protocol.
 const DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -24,6 +26,7 @@ async function exchangeRefreshToken({
   clientId,
   clientSecret,
   refreshToken,
+  requireDriveFile = false,
   fetchImpl = globalThis.fetch
 }) {
   const body = new URLSearchParams({
@@ -50,7 +53,77 @@ async function exchangeRefreshToken({
     throw new Error(`Google OAuth token refresh failed (${code}).`);
   }
 
+  if (requireDriveFile && data.scope?.trim() !== 'https://www.googleapis.com/auth/drive.file') {
+    throw new Error('Google OAuth did not confirm exclusive drive.file access.');
+  }
   return data.access_token;
+}
+
+async function inspectFirstBackupDrive(config, requiredBytes, fetchImpl = globalThis.fetch) {
+  const accessToken = await exchangeRefreshToken({
+    clientId: config.gdriveClientId,
+    clientSecret: config.gdriveClientSecret,
+    refreshToken: config.gdriveRefreshToken,
+    requireDriveFile: true,
+    fetchImpl
+  });
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  async function get(url) {
+    const response = await fetchImpl(url, { headers, redirect: 'error' });
+    if (!response.ok) throw new Error(`Google Drive preflight request failed (HTTP ${response.status}).`);
+    return response.json();
+  }
+  const about = await get('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress),storageQuota(limit,usage)');
+  if (about.user?.emailAddress?.toLowerCase() !== 'arm.shokri@gmail.com') {
+    throw new Error('Google Drive account does not match the approved owner.');
+  }
+  const limit = about.storageQuota?.limit;
+  const usage = about.storageQuota?.usage;
+  if (!/^\d+$/.test(usage ?? '') || (limit != null && !/^\d+$/.test(limit))) {
+    throw new Error('Google Drive quota could not be determined.');
+  }
+  const freeBytes = limit == null ? null : BigInt(limit) - BigInt(usage);
+  if (freeBytes != null && freeBytes < BigInt(requiredBytes)) {
+    throw new Error('Google Drive has insufficient available quota.');
+  }
+  const q = `name='${BACKUP_FOLDER_NAME}' and mimeType='${FOLDER_MIME}' and trashed=false and 'root' in parents`;
+  const fields = 'nextPageToken,files(id,name,ownedByMe,shared,capabilities(canAddChildren))';
+  const params = new URLSearchParams({ q, fields, pageSize: '100' });
+  const existing = await get(`${DRIVE_FILES_URL}?${params}`);
+  if (!Array.isArray(existing.files) || existing.nextPageToken) throw new Error('Google Drive folder selection is ambiguous.');
+  const privateFolders = existing.files.filter(f => f.ownedByMe && f.shared === false && f.capabilities?.canAddChildren);
+  const selected = privateFolders.find(f => f.id === config.gdriveFolderId);
+  if (!selected && privateFolders.length > 1) throw new Error('Multiple private Google Drive backup folders match.');
+  return { accessToken, freeBytes, folder: selected ?? privateFolders[0] };
+}
+
+async function verifyStoredDriveFile({ accessToken, folderId, file, fileName, filePath, fetchImpl }) {
+  if (typeof file.id !== 'string' || !file.id) throw new Error('Google Drive did not identify the stored file.');
+  const url = `${DRIVE_FILES_URL}/${encodeURIComponent(file.id)}`;
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const response = await fetchImpl(`${url}?fields=id,name,size,sha256Checksum,parents,trashed,ownedByMe,shared`, { headers, redirect: 'error' });
+  if (!response.ok) throw new Error('Could not read metadata for the stored Google Drive file.');
+  const info = await response.json();
+  const bytes = fs.statSync(filePath).size;
+  if (info.id !== file.id || info.name !== fileName || info.size !== String(bytes) ||
+      !info.parents?.includes(folderId) || info.trashed !== false || !info.ownedByMe || info.shared !== false) {
+    throw new Error('Stored Google Drive file metadata did not match the expected private upload.');
+  }
+  let sha256 = info.sha256Checksum;
+  if (!sha256) {
+    const media = await fetchImpl(`${url}?alt=media`, { headers, redirect: 'error' });
+    if (!media.ok || !media.body) throw new Error('Could not verify the stored Google Drive file content.');
+    const hash = crypto.createHash('sha256');
+    let received = 0;
+    for await (const chunk of media.body) {
+      received += chunk.length;
+      if (received > bytes) throw new Error('Stored Google Drive file exceeds the expected size.');
+      hash.update(chunk);
+    }
+    if (received !== bytes) throw new Error('Stored Google Drive file size did not match.');
+    sha256 = hash.digest('hex');
+  }
+  if (sha256 !== await sha256File(filePath)) throw new Error('Stored Google Drive SHA-256 did not match.');
 }
 
 /**
@@ -61,7 +134,8 @@ async function exchangeRefreshToken({
 async function ensureBackupFolder({
   accessToken,
   folderId,
-  folderName = 'PureFunction-Encrypted-Backups',
+  folderName = BACKUP_FOLDER_NAME,
+  createOnly = false,
   fetchImpl = globalThis.fetch
 }) {
   const authHeader = { Authorization: `Bearer ${accessToken}` };
@@ -89,15 +163,18 @@ async function ensureBackupFolder({
     return { id: meta.id, name: meta.name, created: false };
   }
 
-  const q = `name='${escapeDriveQueryValue(folderName)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
-  const listUrl = `${DRIVE_FILES_URL}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=10`;
-  const listRes = await fetchImpl(listUrl, { method: 'GET', headers: authHeader });
-  if (!listRes.ok) {
-    throw new Error(`Failed to search Google Drive backup folder (HTTP ${listRes.status}).`);
-  }
-  const listData = await listRes.json();
-  if (Array.isArray(listData.files) && listData.files.length > 0) {
-    return { id: listData.files[0].id, name: listData.files[0].name, created: false };
+  if (!createOnly) {
+    const q = `name='${escapeDriveQueryValue(folderName)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
+    const listUrl = `${DRIVE_FILES_URL}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=10`;
+    const listRes = await fetchImpl(listUrl, { method: 'GET', headers: authHeader });
+    if (!listRes.ok) {
+      throw new Error(`Failed to search Google Drive backup folder (HTTP ${listRes.status}).`);
+    }
+    const listData = await listRes.json();
+    if (Array.isArray(listData.files) && listData.files.length > 0) {
+      return { id: listData.files[0].id, name: listData.files[0].name, created: false };
+    }
+
   }
 
   const createRes = await fetchImpl(`${DRIVE_FILES_URL}?fields=id,name`, {
@@ -269,20 +346,25 @@ async function uploadAndPruneGDrive({
   manifestPath,
   baseName,
   now = new Date(),
+  firstBackup = false,
   chunkSizeBytes = DEFAULT_CHUNK_BYTES,
   fetchImpl = globalThis.fetch
 }) {
-  const accessToken = await exchangeRefreshToken({
+  const firstDestination = firstBackup && await inspectFirstBackupDrive(
+    config, fs.statSync(encPath).size + fs.statSync(manifestPath).size, fetchImpl
+  );
+  const accessToken = firstDestination?.accessToken ?? await exchangeRefreshToken({
     clientId: config.gdriveClientId,
     clientSecret: config.gdriveClientSecret,
     refreshToken: config.gdriveRefreshToken,
     fetchImpl
   });
 
-  const folder = await ensureBackupFolder({
+  const folder = firstDestination?.folder ?? await ensureBackupFolder({
     accessToken,
-    folderId: config.gdriveFolderId,
+    folderId: firstBackup ? undefined : config.gdriveFolderId,
     folderName: config.gdriveFolderName,
+    createOnly: firstBackup,
     fetchImpl
   });
 
@@ -305,6 +387,14 @@ async function uploadAndPruneGDrive({
     chunkSizeBytes,
     fetchImpl
   });
+
+  if (firstBackup) {
+    await verifyStoredDriveFile({ accessToken, folderId: folder.id, file: encFile,
+      fileName: `${baseName}.tar.gz.enc`, filePath: encPath, fetchImpl });
+    await verifyStoredDriveFile({ accessToken, folderId: folder.id, file: manifestFile,
+      fileName: `${baseName}.manifest.json`, filePath: manifestPath, fetchImpl });
+    return { folderName: folder.name, prunedCount: 0 };
+  }
 
   const existing = await listFolderFiles({ accessToken, folderId: folder.id, fetchImpl });
   const objects = existing.map((f) => ({
@@ -341,5 +431,6 @@ module.exports = {
   uploadFileResumable,
   listFolderFiles,
   deleteDriveFile,
+  inspectFirstBackupDrive,
   uploadAndPruneGDrive
 };
