@@ -23,9 +23,11 @@ on:
         options:
           - validate-only
           - connectivity-only
+          - first-drive-preflight
+          - first-drive-backup
           - live-backup
       confirm_live_backup:
-        description: 'Type RUN_BACKUP only when running an approved live-backup'
+        description: 'Type RUN_BACKUP for live-backup or FIRST_DRIVE_BACKUP for the approved first upload'
         required: false
         default: ''
         type: string
@@ -115,13 +117,23 @@ jobs:
   # AND explicit manual confirmation (or future approved schedule).
   run-encrypted-backup:
     if: >-
-      vars.ENABLE_SUPABASE_BACKUP == 'true' &&
       (
-        github.event_name == 'schedule' ||
+        vars.ENABLE_SUPABASE_BACKUP == 'true' &&
         (
-          github.event_name == 'workflow_dispatch' &&
-          inputs.mode == 'live-backup' &&
-          inputs.confirm_live_backup == 'RUN_BACKUP'
+          github.event_name == 'schedule' ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            inputs.mode == 'live-backup' &&
+            inputs.confirm_live_backup == 'RUN_BACKUP'
+          )
+        )
+      ) ||
+      (
+        vars.ENABLE_SUPABASE_BACKUP == 'false' &&
+        github.event_name == 'workflow_dispatch' &&
+        (
+          inputs.mode == 'first-drive-preflight' ||
+          (inputs.mode == 'first-drive-backup' && inputs.confirm_live_backup == 'FIRST_DRIVE_BACKUP')
         )
       )
     runs-on: ubuntu-24.04
@@ -147,11 +159,14 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql-client-17
-          pg_dump --version
+          pg_bin=/usr/lib/postgresql/17/bin
+          "$pg_bin/pg_dump" --version
+          echo "$pg_bin" >> "$GITHUB_PATH"
 
       - name: Execute read-only encrypted backup to configured external storage (S3 or Google Drive)
         id: backup
         env:
+          BACKUP_RUN_MODE: ${{ inputs.mode }}
           ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}
           BACKUP_STORAGE_PROVIDER: ${{ vars.BACKUP_STORAGE_PROVIDER }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
@@ -171,10 +186,15 @@ jobs:
           BACKUP_GDRIVE_FOLDER_NAME: ${{ vars.BACKUP_GDRIVE_FOLDER_NAME }}
           BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS }}
           BACKUP_MIN_KEEP_COUNT: ${{ vars.BACKUP_MIN_KEEP_COUNT }}
-        run: node scripts/backup/run-backup.cjs --confirm-live
+        run: |
+          case "$BACKUP_RUN_MODE" in
+            first-drive-preflight) node scripts/backup/run-backup.cjs --first-drive-preflight ;;
+            first-drive-backup) node scripts/backup/run-backup.cjs --first-drive-backup ;;
+            *) node scripts/backup/run-backup.cjs --confirm-live ;;
+          esac
 
       - name: Report backup failure via GitHub Issue (zero secrets, zero PII)
-        if: failure()
+        if: failure() && inputs.mode != 'first-drive-preflight' && inputs.mode != 'first-drive-backup'
         uses: actions/github-script@v7
         with:
           script: |

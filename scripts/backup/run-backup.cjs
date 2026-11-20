@@ -17,7 +17,8 @@ const {
   computeRetentionDeletions
 } = require('./backup-lib.cjs');
 const { exportSupabaseStorage } = require('./export-storage.cjs');
-const { uploadAndPruneGDrive } = require('./gdrive-storage.cjs');
+const { inspectFirstBackupDrive, uploadAndPruneGDrive } = require('./gdrive-storage.cjs');
+const { runConnectivity } = require('./check-connectivity.cjs');
 
 function runTool(cmd, args, opts = {}) {
   return execFileSync(cmd, args, {
@@ -81,10 +82,55 @@ async function runSelfTest(workDir, encryptionKey) {
   }
 }
 
+async function preflightFirstDriveBackup(cfg, workDir) {
+  if (process.env.ENABLE_SUPABASE_BACKUP !== 'false' || cfg.provider !== 'gdrive' ||
+      cfg.projectRef !== 'rugwzvztweiffprkxfdc' ||
+      cfg.gdriveFolderName !== 'PureFunction-Encrypted-Backups') {
+    throw new Error('First backup requires the approved project and Google Drive folder with the repository backup switch off.');
+  }
+  await runSelfTest(workDir, cfg.encryptionKey);
+  if (!await runConnectivity()) throw new Error('Read-only connectivity preflight failed.');
+  const sql = `SELECT current_setting('server_version_num'), pg_database_size(current_database()),
+    count(*), coalesce(sum(CASE WHEN metadata->>'size' ~ '^[0-9]+$'
+      THEN (metadata->>'size')::numeric ELSE 0 END), 0)
+    FROM storage.objects WHERE name !~ '(^|/)\\.emptyFolderPlaceholder$';`;
+  const output = runTool('psql', ['-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '--dbname', cfg.dbUrl, '-c', sql], {
+    env: readOnlyPgEnv(process.env)
+  }).trim();
+  if (!/^\d+\|\d+\|\d+\|\d+$/.test(output)) throw new Error('Could not estimate the backup source size.');
+  const [serverVersion, databaseBytes, objectCount, storageBytes] = output.split('|').map(BigInt);
+  const clientMajor = runTool('pg_dump', ['--version']).match(/PostgreSQL\) (\d+)/)?.[1];
+  if (!clientMajor || BigInt(clientMajor) < serverVersion / 10000n) {
+    throw new Error('PostgreSQL client is older than the source server.');
+  }
+  console.log(`Source estimate: PostgreSQL ${databaseBytes} bytes; Storage ${storageBytes} bytes across ${objectCount} objects; pg_dump ${clientMajor}.`);
+  const destination = await inspectFirstBackupDrive(cfg, databaseBytes + storageBytes);
+  console.log(`Drive quota: ${destination.freeBytes ?? 'unlimited'} available bytes. Private folder: ${destination.folder ? 'available' : 'will be created during backup'}.`);
+  return objectCount;
+}
+
+function verifyDumpContents(item) {
+  if (!item.name.endsWith('.dump')) return;
+  const contents = runTool('pg_restore', ['--list', item.outputPath]);
+  const required = {
+    'public-private-full.dump': ['public clients', 'public workouts'],
+    'auth-full.dump': ['auth users', 'auth identities'],
+    'storage-schema-full.dump': ['storage buckets', 'storage objects'],
+    'supabase-migrations.dump': ['supabase_migrations schema_migrations']
+  };
+  for (const entry of required[item.name]) {
+    if (!contents.includes(`TABLE ${entry} `) || !contents.includes(`TABLE DATA ${entry} `)) {
+      throw new Error('Expected table definition or data is missing from a database component.');
+    }
+  }
+}
+
 async function main() {
   const args = new Set(process.argv.slice(2));
   const validateOnly = args.has('--validate-only') || args.has('--dry-run');
   const confirmLive = args.has('--confirm-live');
+  const firstBackup = args.has('--first-drive-backup');
+  const firstPreflight = args.has('--first-drive-preflight');
 
   process.umask(0o077);
   const validation = validateBackupConfig(process.env);
@@ -121,7 +167,7 @@ async function main() {
       return;
     }
 
-    if (!confirmLive || !validation.config.enabled) {
+    if (!firstBackup && !firstPreflight && (!confirmLive || !validation.config.enabled)) {
       console.error(
         'Refusing to execute live backup: requires BOTH --confirm-live flag and ENABLE_SUPABASE_BACKUP=true.'
       );
@@ -130,6 +176,11 @@ async function main() {
     }
 
     const cfg = validation.config;
+    let expectedStorageObjects;
+    if (firstBackup || firstPreflight) {
+      expectedStorageObjects = await preflightFirstDriveBackup(cfg, workDir);
+      if (firstPreflight) return;
+    }
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z');
     const stageDir = path.join(workDir, 'payload');
     const dbDir = path.join(stageDir, 'db');
@@ -147,6 +198,7 @@ async function main() {
       if (stat.size === 0) {
         throw new Error(`pg_dump produced an empty file for ${item.name}`);
       }
+      if (firstBackup) verifyDumpContents(item);
       dbComponents.push({
         name: item.name,
         bytes: stat.size,
@@ -162,6 +214,10 @@ async function main() {
       serviceRoleKey: cfg.serviceRoleKey,
       outputDir: storageDir
     });
+    if (firstBackup && (storageSummary.missingExpectedBuckets.length ||
+        BigInt(storageSummary.objectCount) !== expectedStorageObjects)) {
+      throw new Error('Storage export did not match the expected buckets and object count.');
+    }
 
     // 3) Package tarball
     console.log('[3/6] Creating compressed archive...');
@@ -212,17 +268,20 @@ async function main() {
     let prunedCount = 0;
     if (cfg.provider === 'gdrive') {
       console.log(`[5/6] Uploading encrypted archive to Google Drive folder "${cfg.gdriveFolderName}"...`);
-      console.log(`[6/6] Evaluating Google Drive retention policy (${cfg.retentionDays}d, minimum ${cfg.minKeepCount} backups kept)...`);
+      console.log(firstBackup ? '[6/6] Google Drive retention deletion disabled for this run.'
+        : `[6/6] Evaluating Google Drive retention policy (${cfg.retentionDays}d, minimum ${cfg.minKeepCount} backups kept)...`);
       const gdriveRes = await uploadAndPruneGDrive({
         config: cfg,
         encPath,
         manifestPath,
-        baseName
+        baseName,
+        firstBackup
       });
       prunedCount = gdriveRes.prunedCount;
       console.log(
         `PASS: Encrypted backup ${baseName}.tar.gz.enc uploaded to Google Drive folder "${gdriveRes.folderName}" (${encBytes} bytes, ${storageSummary.objectCount} storage files). Pruned ${prunedCount} expired file(s).`
       );
+      if (firstBackup) console.log(`PASS: Stored archive and manifest sizes and SHA-256 verified. Archive SHA-256: ${encSha256}.`);
     } else {
       console.log('[5/6] Uploading encrypted archive and non-PII manifest to external S3-compatible bucket...');
       const awsEnv = s3Env(cfg);
@@ -261,7 +320,9 @@ async function main() {
       );
     }
   } catch (err) {
-    console.error('BACKUP FAILED:', redactSecrets(err && err.stack ? err.stack : String(err), secrets));
+    console.error('BACKUP FAILED:', firstBackup || firstPreflight
+      ? 'The current backup stage did not complete. Sensitive operation details are suppressed.'
+      : redactSecrets(err && err.stack ? err.stack : String(err), secrets));
     process.exitCode = 1;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });

@@ -492,6 +492,54 @@ describe('Google Drive backup destination (config, OAuth, resumable upload, rete
     expect(deletedIds).toContain('man-8');
   });
 
+  it.each([true, false])('verifies the first Drive upload and never prunes (valid checksum: %s)', async valid => {
+    const dir = makeTmpDir();
+    const encPath = path.join(dir, 'archive');
+    const manifestPath = path.join(dir, 'manifest');
+    fs.writeFileSync(encPath, 'encrypted test bytes');
+    fs.writeFileSync(manifestPath, '{}');
+    const stored = new Map();
+    const requests = [];
+    const folder = 'private-folder';
+    const fetchImpl = async (url, options = {}) => {
+      const endpoint = new URL(url);
+      requests.push(options.method ?? 'GET');
+      if (endpoint.pathname === '/token') return Response.json({
+        access_token: 'synthetic', scope: 'https://www.googleapis.com/auth/drive.file'
+      });
+      if (endpoint.pathname.endsWith('/about')) return Response.json({
+        user: { emailAddress: 'arm.shokri@gmail.com' }, storageQuota: { limit: '9000', usage: '0' }
+      });
+      if (endpoint.searchParams.has('q')) return Response.json({ files: [] });
+      if (endpoint.searchParams.has('uploadType')) {
+        const { name, parents } = JSON.parse(options.body);
+        expect(parents).toEqual([folder]);
+        return new Response(null, { headers: { location: `https://example.test/${name}` } });
+      }
+      if (endpoint.hostname === 'example.test') {
+        const id = endpoint.pathname.slice(1);
+        stored.set(id, Buffer.from(options.body));
+        return Response.json({ id });
+      }
+      if (options.method === 'POST') return Response.json({ id: folder, name: 'PureFunction-Encrypted-Backups' });
+      const id = endpoint.pathname.split('/').at(-1);
+      const payload = stored.get(id);
+      if (endpoint.searchParams.get('alt') === 'media') return new Response(payload);
+      const info = { id, name: id, size: String(payload.length), parents: [folder],
+        ownedByMe: true, shared: false, trashed: false };
+      if (id.endsWith('.enc')) info.sha256Checksum = valid ? await sha256File(encPath) : '0'.repeat(64);
+      return Response.json(info);
+    };
+    const task = uploadAndPruneGDrive({
+      config: validateBackupConfig(VALID_GDRIVE_ENV).config, encPath, manifestPath,
+      baseName: 'backup', firstBackup: true, fetchImpl
+    });
+    if (valid) await expect(task).resolves.toMatchObject({ prunedCount: 0 });
+    else await expect(task).rejects.toThrow('SHA-256 did not match');
+    expect(stored.size).toBe(2);
+    expect(requests).not.toContain('DELETE');
+  });
+
   it('passes CLI --validate-only for gdrive provider and keeps workflow wired & disabled by default', () => {
     const scriptPath = path.resolve(process.cwd(), 'scripts/backup/run-backup.cjs');
     const out = execFileSync(process.execPath, [scriptPath, '--validate-only'], {
