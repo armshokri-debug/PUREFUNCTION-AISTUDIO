@@ -1,47 +1,51 @@
 // Coach-only: email a client their invite link (verify_jwt = true).
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
-import { APP_URL, cors, json, layout, sendEmail } from '../_shared/email.ts';
+import { APP_URL, CooldownTracker, sendEmail } from '../_shared/email.ts';
+import { handleSendInvite } from './handler.ts';
+
+const inviteCooldown = new CooldownTracker();
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
-  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' });
-
   const url = Deno.env.get('SUPABASE_URL')!;
-  const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
-
-  // who is calling?
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const { data: userData } = await admin.auth.getUser(token);
-  const uid = userData.user?.id;
-  if (!uid) return json(401, { error: 'Sign in again.' });
-  // Use the caller's JWT for row access so revoked/unverified coaches also fail RLS.
-  const caller = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
+  const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false }
   });
-  const { data: me } = await admin.from('profiles').select('role, display_name').eq('id', uid).maybeSingle();
-  if (me?.role !== 'coach') return json(403, { error: 'Only the coach can send invites.' });
 
-  const { clientId } = await req.json().catch(() => ({}));
-  // RLS plus an explicit ownership check before revealing email or sending.
-  const { data: client } = await caller.from('clients').select('id, email, data, coach_id').eq('id', String(clientId ?? '')).maybeSingle();
-  if (!client || client.coach_id !== uid) return json(403, { error: 'Only the owning coach may invite this client.' });
-  if (!client.email) return json(400, { error: 'This client has no email yet.' });
-
-  const name = String(client.data?.name ?? '').split(' ')[0] || 'there';
-  const coach = me.display_name || 'Your coach';
-  const link = `${APP_URL}?join=${encodeURIComponent(client.email)}`;
-  const r = await sendEmail(
-    client.email,
-    `${coach} invited you to Pure Function`,
-    layout(
-      `Hi ${name}, your training is ready`,
-      [
-        `${coach} set up your program in Pure Function.`,
-        `Tap the button, choose a password, and you’ll see your workouts. Your email (${client.email}) is already filled in.`
-      ],
-      { text: 'Set up my account', url: link }
-    )
-  );
-  return r.ok ? json(200, { ok: true }) : json(r.status, { error: r.error });
+  return handleSendInvite(req, {
+    appUrl: APP_URL,
+    cooldown: inviteCooldown,
+    sendEmail,
+    getUserByToken: async (token) => {
+      const { data } = await admin.auth.getUser(token);
+      return data.user ? { id: data.user.id } : null;
+    },
+    getCoachProfile: async (uid) => {
+      const { data } = await admin.from('profiles').select('role, display_name').eq('id', uid).maybeSingle();
+      return data;
+    },
+    getOwnedClient: async (token, clientId) => {
+      // Use the caller's JWT for row access so revoked/unverified coaches also fail RLS.
+      const caller = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false }
+      });
+      const { data, error } = await caller
+        .from('clients')
+        .select('id, email, data, coach_id')
+        .eq('id', clientId)
+        .maybeSingle();
+      return error ? null : data;
+    },
+    isClientAccountConfirmed: async (clientId) => {
+      const { data: profile } = await admin
+        .from('profiles')
+        .select('id')
+        .eq('client_id', clientId)
+        .eq('role', 'client')
+        .maybeSingle();
+      if (!profile?.id) return false;
+      const { data } = await admin.auth.admin.getUserById(profile.id);
+      return Boolean(data.user?.email_confirmed_at);
+    }
+  });
 });

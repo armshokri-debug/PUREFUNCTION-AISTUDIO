@@ -26,6 +26,9 @@ export async function sendInviteEmail(clientId: string): Promise<string | null> 
     if (res.status === 403) {
       return 'Email delivery is blocked until a verified sender domain is configured in Resend.';
     }
+    if (res.status === 429) {
+      return 'Please wait a minute before sending another invite.';
+    }
     return 'Could not send the email. Try again.';
   } catch {
     return 'No connection. Check your internet and try again.';
