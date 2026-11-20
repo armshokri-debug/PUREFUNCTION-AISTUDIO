@@ -9,6 +9,7 @@ const {
   ALLOWED_PROJECT_REF,
   EXPECTED_FALSE_SHA256,
   verifyPausedSecretDigest,
+  verifyFunctionMetadata,
   verifyDeployedDailyReminders
 } = require('./verify-daily-reminders-paused.cjs');
 
@@ -57,10 +58,34 @@ describe('daily-reminders safe deploy & paused verification script', () => {
     ).rejects.toThrow(/not set to exact value "false"/i);
   });
 
-  it('verifies HTTP 401 unauthorized + HTTP 200 paused=true and never prints tokens or Vault secrets', async () => {
+  it('verifies deployed function metadata requires ACTIVE status and verify_jwt=false', async () => {
+    await expect(
+      verifyFunctionMetadata({
+        projectRef: ALLOWED_PROJECT_REF,
+        accessToken: 'sbp_mock',
+        fetcher: async () =>
+          new Response(JSON.stringify({ slug: 'daily-reminders', status: 'ACTIVE', verify_jwt: false, version: 5 }), {
+            status: 200
+          })
+      })
+    ).resolves.toEqual({ status: 'ACTIVE', verifyJwt: false, version: 5 });
+
+    await expect(
+      verifyFunctionMetadata({
+        projectRef: ALLOWED_PROJECT_REF,
+        accessToken: 'sbp_mock',
+        fetcher: async () =>
+          new Response(JSON.stringify({ slug: 'daily-reminders', status: 'ACTIVE', verify_jwt: true, version: 5 }), {
+            status: 200
+          })
+      })
+    ).rejects.toThrow(/verify_jwt to be false/i);
+  });
+
+  it('verifies paused=true via in-DB pg_net without ever extracting Vault secrets or logging tokens', async () => {
     const secretToken = 'sbp_top_secret_token_xyz987';
-    const vaultCronSecret = 'vault_cron_secret_abcdef0123456789';
     const logs = [];
+    let pollCalls = 0;
 
     const fetcher = async (url, init = {}) => {
       if (url === `https://api.supabase.com/v1/projects/${ALLOWED_PROJECT_REF}/secrets`) {
@@ -69,22 +94,48 @@ describe('daily-reminders safe deploy & paused verification script', () => {
           { status: 200 }
         );
       }
-      if (url === `https://api.supabase.com/v1/projects/${ALLOWED_PROJECT_REF}/database/query`) {
-        const body = JSON.parse(String(init.body));
-        expect(body.read_only).toBe(true);
-        expect(body.query).toContain("name = 'cron_secret'");
-        return new Response(JSON.stringify([{ decrypted_secret: vaultCronSecret }]), { status: 201 });
-      }
-      if (url === `https://${ALLOWED_PROJECT_REF}.supabase.co/functions/v1/daily-reminders`) {
-        const headers = init.headers || {};
-        if (!headers['x-cron-secret']) {
-          return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
-        }
-        expect(headers['x-cron-secret']).toBe(vaultCronSecret);
+      if (url === `https://api.supabase.com/v1/projects/${ALLOWED_PROJECT_REF}/functions/daily-reminders`) {
         return new Response(
-          JSON.stringify({ today: '2026-11-20', timezone: 'Asia/Tehran', paused: true, results: [] }),
+          JSON.stringify({ slug: 'daily-reminders', status: 'ACTIVE', verify_jwt: false, version: 4 }),
           { status: 200 }
         );
+      }
+      if (url === `https://${ALLOWED_PROJECT_REF}.supabase.co/functions/v1/daily-reminders`) {
+        // Only the unauthorized check calls the function directly from Node.js
+        expect(init.headers?.['x-cron-secret']).toBeUndefined();
+        return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+      }
+      if (url === `https://api.supabase.com/v1/projects/${ALLOWED_PROJECT_REF}/database/query`) {
+        const body = JSON.parse(String(init.body));
+        // Must NOT send read_only property (which caused HTTP 400 under supabase_read_only_user)
+        expect(Object.keys(body)).toEqual(['query']);
+        if (body.query.includes('net.http_post')) {
+          expect(body.query).toContain('vault.decrypted_secrets');
+          // Returns ONLY integer request_id — never the Vault secret
+          return new Response(JSON.stringify([{ request_id: 12345 }]), { status: 201 });
+        }
+        if (body.query.includes('net._http_response')) {
+          expect(body.query).toContain('WHERE id = 12345');
+          pollCalls++;
+          if (pollCalls === 1) {
+            return new Response(JSON.stringify([]), { status: 201 });
+          }
+          return new Response(
+            JSON.stringify([
+              {
+                status_code: 200,
+                timed_out: false,
+                content: JSON.stringify({
+                  today: '2026-11-20',
+                  timezone: 'Asia/Tehran',
+                  paused: true,
+                  results: []
+                })
+              }
+            ]),
+            { status: 201 }
+          );
+        }
       }
       throw new Error(`Unexpected URL: ${url}`);
     };
@@ -93,34 +144,82 @@ describe('daily-reminders safe deploy & paused verification script', () => {
       projectRef: ALLOWED_PROJECT_REF,
       accessToken: secretToken,
       fetcher,
+      sleep: async () => {},
+      maxPollAttempts: 3,
+      pollIntervalMs: 1,
       log: (line) => logs.push(line)
     });
 
     expect(result).toEqual({ paused: true, today: '2026-11-20', timezone: 'Asia/Tehran', resultCount: 0 });
+    expect(pollCalls).toBe(2);
     const allLogs = logs.join('\n');
     expect(allLogs).toContain('HTTP 401');
     expect(allLogs).toContain('paused=true');
     expect(allLogs).not.toContain(secretToken);
-    expect(allLogs).not.toContain(vaultCronSecret);
     expect(allLogs).not.toContain(EXPECTED_FALSE_SHA256);
   });
 
-  it('fails cleanly if unauthorized POST is not rejected with 401 or if response is not paused=true', async () => {
+  it('classifies HTTP 403 token permission errors and HTTP 400 SQL errors cleanly without leaking raw payload text', async () => {
+    const makeFetcher = (dbStatus, dbText) => async (url) => {
+      if (url.endsWith('/secrets')) {
+        return new Response(JSON.stringify([{ name: 'DAILY_REMINDERS_ENABLED', value: EXPECTED_FALSE_SHA256 }]), {
+          status: 200
+        });
+      }
+      if (url.endsWith('/functions/daily-reminders')) {
+        return new Response(JSON.stringify({ status: 'ACTIVE', verify_jwt: false, version: 4 }), { status: 200 });
+      }
+      if (url.includes('.supabase.co/functions/v1/daily-reminders')) {
+        return new Response('{}', { status: 401 });
+      }
+      return new Response(dbText, { status: dbStatus });
+    };
+
+    await expect(
+      verifyDeployedDailyReminders({
+        projectRef: ALLOWED_PROJECT_REF,
+        accessToken: 'sbp_mock',
+        fetcher: makeFetcher(403, 'secret-raw-403-detail'),
+        sleep: async () => {},
+        log: () => {}
+      })
+    ).rejects.toThrow(/lacks database query permission \(HTTP 403\)/i);
+
+    await expect(
+      verifyDeployedDailyReminders({
+        projectRef: ALLOWED_PROJECT_REF,
+        accessToken: 'sbp_mock',
+        fetcher: makeFetcher(400, 'ERROR: 42501 permission denied for secret_internal_table'),
+        sleep: async () => {},
+        log: () => {}
+      })
+    ).rejects.toThrow(/SQLSTATE 42501/i);
+  });
+
+  it('fails cleanly if unauthorized POST is not rejected with 401 or if in-DB response is not paused=true', async () => {
     const baseFetcher = (unauthStatus, authBody) => async (url, init = {}) => {
       if (url.endsWith('/secrets')) {
         return new Response(JSON.stringify([{ name: 'DAILY_REMINDERS_ENABLED', value: EXPECTED_FALSE_SHA256 }]), {
           status: 200
         });
       }
-      if (url.endsWith('/database/query')) {
-        return new Response(JSON.stringify([{ decrypted_secret: 'vault_cron_secret_abcdef0123456789' }]), {
-          status: 201
-        });
+      if (url.endsWith('/functions/daily-reminders')) {
+        return new Response(JSON.stringify({ status: 'ACTIVE', verify_jwt: false, version: 4 }), { status: 200 });
       }
-      if (!init.headers?.['x-cron-secret']) {
+      if (url.includes('.supabase.co/functions/v1/daily-reminders')) {
         return new Response('{}', { status: unauthStatus });
       }
-      return new Response(JSON.stringify(authBody), { status: 200 });
+      if (url.endsWith('/database/query')) {
+        const body = JSON.parse(String(init.body));
+        if (body.query.includes('net.http_post')) {
+          return new Response(JSON.stringify([{ request_id: 77 }]), { status: 201 });
+        }
+        return new Response(
+          JSON.stringify([{ status_code: 200, timed_out: false, content: JSON.stringify(authBody) }]),
+          { status: 201 }
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
     };
 
     await expect(
@@ -128,6 +227,7 @@ describe('daily-reminders safe deploy & paused verification script', () => {
         projectRef: ALLOWED_PROJECT_REF,
         accessToken: 'sbp_mock',
         fetcher: baseFetcher(200, { paused: true, results: [] }),
+        sleep: async () => {},
         log: () => {}
       })
     ).rejects.toThrow(/Expected HTTP 401/i);
@@ -137,6 +237,7 @@ describe('daily-reminders safe deploy & paused verification script', () => {
         projectRef: ALLOWED_PROJECT_REF,
         accessToken: 'sbp_mock',
         fetcher: baseFetcher(401, { today: '2026-11-20', timezone: 'Asia/Tehran', results: [] }),
+        sleep: async () => {},
         log: () => {}
       })
     ).rejects.toThrow(/did NOT return paused: true/i);
@@ -155,6 +256,7 @@ describe('deploy-daily-reminders.yml workflow safety invariants', () => {
     expect(yaml).toContain('DEPLOY_DAILY_REMINDERS');
     expect(yaml).toContain('supabase functions deploy daily-reminders');
     expect(yaml).toContain('--no-verify-jwt');
+    expect(yaml).toContain('--yes');
     expect(yaml).toContain('verify-daily-reminders-paused.cjs --pre-deploy');
     expect(yaml).toContain('verify-daily-reminders-paused.cjs --post-deploy');
 
