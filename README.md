@@ -2,9 +2,9 @@
 
 Assessment-driven coaching PWA with independent coach rosters, client workouts, exercise programs, assessments and messaging.
 
-Production: https://armshokri-debug.github.io/PUREFUNCTION-NEW/
+Production: https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/
 
-Repository: https://github.com/armshokri-debug/PUREFUNCTION-NEW
+Repository: https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO
 
 ## Development and validation
 
