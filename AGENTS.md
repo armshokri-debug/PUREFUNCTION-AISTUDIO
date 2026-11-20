@@ -4,8 +4,8 @@ Owner: Armin. Answer him in short, simple Persian. He is not a programmer.
 
 ## Current project
 
-- Repository: https://github.com/armshokri-debug/PUREFUNCTION-NEW
-- Production: https://armshokri-debug.github.io/PUREFUNCTION-NEW/
+- Repository: https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO
+- Production: https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/
 - Supabase: `rugwzvztweiffprkxfdc`
 - Recovery branch: `recovery/stability-2026-11-13`
 - Read `README.md`, `docs/BODY_FIGURE.md` and `docs/RECOVERY_STABILITY_AUDIT_2026-11-13.md` first.
