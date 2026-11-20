@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { isCloud, supabase, supabaseUrl } from './supabase';
+import { clearPendingRecovery, hasPendingRecovery, markPendingRecovery } from './recoveryGate';
 
 export interface Profile {
   id: string;
@@ -16,6 +17,7 @@ export type SessionStatus =
   | 'signed-out'
   | 'no-access' // signed in, but not the coach and not on a client list
   | 'reset' // opened a password-reset link: choose a new password
+  | 'reset-complete' // updateUser succeeded; user must sign in again
   | 'ready';
 
 interface SessionValue {
@@ -30,8 +32,10 @@ interface SessionValue {
   notice: string | null;
   /** Emails a reset link. Returns an error message or null. */
   forgotPassword: (email: string) => Promise<string | null>;
-  /** After opening a reset link: saves the new password and continues into the app. */
+  /** Saves a password only inside verified recovery; requires a fresh login afterwards. */
   setNewPassword: (password: string) => Promise<string | null>;
+  /** Leaves the recovery success screen for a fresh password-based sign-in. */
+  finishRecovery: () => void;
   /** Re-checks access, e.g. after the coach adds this email. */
   refresh: () => Promise<void>;
 }
@@ -51,13 +55,28 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [profile, setProfile] = useState<Profile | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const resetPending = React.useRef(new URLSearchParams(window.location.search).has('reset'));
+  const resetPending = React.useRef(hasPendingRecovery() || new URLSearchParams(window.location.search).has('reset'));
+  const resetCompleted = React.useRef(false);
 
   const profileRequest = React.useRef(0);
   const loginPending = React.useRef(false);
   const loadProfile = useCallback(async (s: Session | null, portal?: Profile['role']): Promise<string | null> => {
     if (!supabase) return 'Cloud is not configured.';
     const request = ++profileRequest.current;
+    // A recovery link creates a valid Supabase session BEFORE the password is changed.
+    // Never show the workspace while recovery is pending, even after page refresh.
+    if (resetPending.current) {
+      setSession(s);
+      setProfile(null);
+      if (s) setStatus('reset');
+      else {
+        resetPending.current = false;
+        clearPendingRecovery();
+        setStatus('signed-out');
+      }
+      return null;
+    }
+    if (resetCompleted.current) return null;
     if (!s) {
       setProfile(null);
       setStatus('signed-out');
@@ -68,7 +87,7 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .select('id, role, display_name, client_id')
       .eq('id', s.user.id)
       .maybeSingle();
-    if (request !== profileRequest.current) return null;
+    if (request !== profileRequest.current || resetPending.current || resetCompleted.current) return null;
     if (error || !data || !['coach', 'client'].includes(data.role)) {
       setProfile(null);
       setStatus('no-access');
@@ -127,6 +146,11 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (error) setNotice('That verification link has expired or was already used. Request a new one.');
       }
       if (resetToken) {
+        resetPending.current = true;
+        markPendingRecovery();
+        ++profileRequest.current;
+        setProfile(null);
+        setStatus('loading');
         const url = new URL(window.location.href);
         url.searchParams.delete('reset');
         window.history.replaceState(null, '', url.toString());
@@ -138,22 +162,69 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return;
         }
         resetPending.current = false;
+        clearPendingRecovery();
         setNotice('That reset link has expired or was already used. Send a new one below.');
+        // A failed recovery must not silently fall into a previously cached session.
+        await supabase!.auth.signOut({ scope: 'local' });
       }
       const { data } = await supabase!.auth.getSession();
       if (!active) return;
+      if (resetPending.current) {
+        if (data.session) {
+          setSession(data.session);
+          setProfile(null);
+          setStatus('reset');
+        } else {
+          resetPending.current = false;
+          clearPendingRecovery();
+          setNotice('Your recovery session expired. Please request a new link.');
+          setStatus('signed-out');
+        }
+        return;
+      }
       setSession(data.session);
       void loadProfile(data.session);
     };
     void start();
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       if (!active || (event === 'SIGNED_IN' && loginPending.current)) return;
+      if (event === 'SIGNED_OUT') {
+        ++profileRequest.current;
+        setSession(null);
+        setProfile(null);
+        if (resetCompleted.current) {
+          setStatus('reset-complete');
+          return;
+        }
+        resetPending.current = false;
+        clearPendingRecovery();
+        setStatus('signed-out');
+        return;
+      }
+      if (event === 'PASSWORD_RECOVERY') {
+        resetPending.current = true;
+        markPendingRecovery();
+        ++profileRequest.current;
+        setSession(s);
+        setProfile(null);
+        setStatus('reset');
+        return;
+      }
+      if (resetCompleted.current) return;
       setSession(s);
-      if (event === 'SIGNED_OUT') { resetPending.current = false; ++profileRequest.current; setProfile(null); setStatus('signed-out'); }
-      if (event === 'PASSWORD_RECOVERY') { resetPending.current = true; setProfile(null); setStatus('reset'); return; }
-      if (event === 'SIGNED_OUT' || ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && !resetPending.current)) {
-        // defer: Supabase recommends not awaiting other calls inside this callback
-        window.setTimeout(() => { if (active && !loginPending.current) void loadProfile(s); }, 0);
+      if (resetPending.current) {
+        ++profileRequest.current;
+        setProfile(null);
+        if (s) setStatus('reset');
+        return;
+      }
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+        // Supabase warns against awaiting API calls inside this callback.
+        window.setTimeout(() => {
+          if (active && !loginPending.current && !resetPending.current && !resetCompleted.current) {
+            void loadProfile(s);
+          }
+        }, 0);
       }
     });
     return () => {
@@ -170,6 +241,10 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (error) return friendlyAuthError(error.message);
+      resetPending.current = false;
+      resetCompleted.current = false;
+      clearPendingRecovery();
+      setNotice(null);
       return await loadProfile(data.session, portal);
     } catch { return 'No connection. Check your internet and try again.'; }
     finally { loginPending.current = false; }
@@ -233,19 +308,36 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const setNewPassword = async (password: string) => {
     if (!supabase) return 'Cloud is not configured.';
-    if (password.length < 8) return 'Password must be at least 8 characters.';
-    const { data, error } = await supabase.auth.updateUser({ password });
-    if (error) return friendlyAuthError(error.message);
-    resetPending.current = false;
-    const { data: s } = await supabase.auth.getSession();
-    void data;
-    await loadProfile(s.session);
-    return null;
+    if (!resetPending.current) return 'Open a fresh recovery link before changing your password.';
+    if (password.length < 8 || password.length > 72) return 'Password must be 8 to 72 characters.';
+    try {
+      const { data, error } = await supabase.auth.updateUser({ password });
+      if (error) return friendlyAuthError(error.message);
+      if (!data.user) return 'Password change could not be confirmed. Please try again.';
+      // Supabase confirmed the credential update. Do NOT treat the recovery session
+      // as a normal login. Require entering the new password independently.
+      resetCompleted.current = true;
+      resetPending.current = false;
+      clearPendingRecovery();
+      ++profileRequest.current;
+      setProfile(null);
+      setSession(null);
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+      setNotice(signOutError
+        ? 'Password saved, but this device could not sign out. Close this tab before signing in again.'
+        : null);
+      setStatus('reset-complete');
+      return null;
+    } catch {
+      return 'Could not save the password. Check your connection and try again.';
+    }
   };
 
   const signOut = async () => {
     if (!supabase) return;
     resetPending.current = false;
+    resetCompleted.current = false;
+    clearPendingRecovery();
     ++profileRequest.current;
     setSession(null);
     setProfile(null);
@@ -266,6 +358,11 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         notice,
         forgotPassword,
         setNewPassword,
+        finishRecovery: () => {
+          resetCompleted.current = false;
+          setNotice(null);
+          setStatus('signed-out');
+        },
         refresh: async () => { await loadProfile(session); }
       }}
     >

@@ -368,14 +368,53 @@ const today = iso(new Date());
   await F.getByRole('heading', { name: 'Choose a new password' }).waitFor({ timeout: 8000 }).catch(() => {});
   ok(await F.getByRole('heading', { name: 'Choose a new password' }).isVisible(), 'reset link opens the new password screen');
   ok(!(await F.evaluate(() => location.search.includes('reset='))), 'reset token removed from the address bar');
-  await F.getByLabel('New password').fill('newpass99');
-  await F.getByRole('button', { name: 'Save password' }).click();
-  await F.getByText('Workout completed').waitFor({ timeout: 10000 }).catch(() => {});
-  ok(await F.getByText('Workout completed').isVisible(), 'after the new password the client lands in the app');
-  ok(mock.db.users.find((u) => u.email === 'ryan@example.com').password === 'newpass99', 'new password saved');
+  // Receiving a reset session must NOT count as a password change or normal sign-in.
+  const previousPassword = mock.db.users.find((u) => u.email === 'ryan@example.com').password;
+  await F.getByLabel('New password', { exact: true }).fill('newpass99');
+  await F.getByLabel('Confirm new password').fill('not-matching');
+  await F.getByRole('button', { name: 'Save new password' }).click();
+  await F.getByText('Passwords do not match.').waitFor();
+  ok(mock.db.users.find((u) => u.email === 'ryan@example.com').password === previousPassword, 'mismatched confirmation cannot change password');
+
+  await F.getByLabel('Confirm new password').fill('newpass99');
+  await F.getByLabel('Confirm new password').press('Enter');
+  ok(mock.db.users.find((u) => u.email === 'ryan@example.com').password === previousPassword, 'mobile keyboard Enter does not implicitly submit password change');
+  await F.reload();
+  await F.getByRole('heading', { name: 'Choose a new password' }).waitFor({ timeout: 8000 });
+  ok(!(await F.getByText('Workout completed').isVisible()), 'reloading an unfinished recovery stays out of the workspace');
+  ok(mock.db.users.find((u) => u.email === 'ryan@example.com').password === previousPassword, 'reload cannot save password');
+
+  await F.getByLabel('New password', { exact: true }).fill('newpass99');
+  await F.getByLabel('Confirm new password').fill('newpass99');
+  await F.getByRole('button', { name: 'Save new password' }).click();
+  await F.getByText('Password updated successfully').waitFor({ timeout: 10000 });
+  ok(!(await F.getByText('Workout completed').isVisible()), 'successful reset displays confirmation, not auto-login');
+  ok(mock.db.users.find((u) => u.email === 'ryan@example.com').password === 'newpass99', 'new password saved by Auth API');
+  await F.reload();
+  await F.getByRole('heading', { name: 'Client sign in', exact: true }).waitFor({ timeout: 8000 });
+  ok(true, 'after successful reset, refresh requires a fresh login');
+
+  await F.getByLabel('Email', { exact: true }).fill('ryan@example.com');
+  await F.getByLabel('Password', { exact: true }).fill('wrong-pass');
+  await F.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await F.getByText('Email or password is not correct.').waitFor({ timeout: 8000 });
+  ok(true, 'password reset does not accept an incorrect password');
+  await F.getByLabel('Password', { exact: true }).fill('newpass99');
+  await F.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await F.getByText('Workout completed').waitFor({ timeout: 10000 });
+  ok(true, 'password reset requires new credentials for successful login');
+
+  const secondDevice = await open({ width: 1280, height: 800 });
+  await secondDevice.getByLabel('Email', { exact: true }).fill('ryan@example.com');
+  await secondDevice.getByLabel('Password', { exact: true }).fill('newpass99');
+  await secondDevice.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await secondDevice.getByText('Workout completed').waitFor({ timeout: 10000 });
+  ok(true, 'new password works in a second independent browser context');
+  secondDevice.errors.forEach(e => C.errors.push(e));
+
   await F.goto(`http://localhost:${PORT}/?reset=${mail.token}`);
   await F.getByText('reset link has expired').waitFor({ timeout: 8000 }).catch(() => {});
-  ok(await F.getByText('reset link has expired').isVisible() || (await F.getByText('Workout completed').isVisible()), 'used reset link is not accepted twice');
+  ok(await F.getByText('reset link has expired').isVisible(), 'used reset token cannot be consumed twice');
 
   // Cancelling password recovery must not leave future sign-ins stuck.
   const cancelToken = 'rst-cancel-fixture';
@@ -383,7 +422,7 @@ const today = iso(new Date());
   const K = await open({ width: 375, height: 812 });
   await K.goto(`http://localhost:${PORT}/?reset=${cancelToken}`);
   await K.getByRole('heading', { name: 'Choose a new password', exact: true }).waitFor();
-  await K.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await K.getByRole('button', { name: 'Cancel recovery', exact: true }).click();
   await K.getByLabel('Email', { exact: true }).fill('ryan@example.com');
   await K.getByLabel('Password', { exact: true }).fill('newpass99');
   await K.getByRole('button', { name: 'Sign in', exact: true }).click();
