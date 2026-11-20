@@ -3,7 +3,7 @@
 // A one-time verification link is sent via Resend before any login is possible.
 // Never auto-confirm a new user's email.
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
-import { APP_URL, sendEmail } from '../_shared/email.ts';
+import { APP_URL, sendTransactionalEmail } from '../_shared/email.ts';
 import { handleSignUp } from './handler.ts';
 
 Deno.serve(async (req) => {
@@ -13,7 +13,7 @@ Deno.serve(async (req) => {
 
   return handleSignUp(req, {
     appUrl: APP_URL,
-    sendEmail,
+    sendEmail: sendTransactionalEmail,
     reserveSignupVerification: (email) => admin.rpc('reserve_signup_verification', { p_email: email }),
     getSignupRole: (email) => admin.rpc('signup_role', { p_email: email }),
     isExistingSignupAccount: (email) => admin.rpc('is_existing_signup_account', { p_email: email }),
