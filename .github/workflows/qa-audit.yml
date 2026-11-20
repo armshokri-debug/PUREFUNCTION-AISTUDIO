@@ -1,0 +1,131 @@
+name: QA Read-Only Parity Audit (Manual Only)
+
+# Strictly read-only structural parity audit for the QA Supabase project
+# (nsshdxxdvzzxlmdomixf). Never modifies databases, deploys Edge Functions,
+# seeds users, or touches Production.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run offline safety validation or live read-only QA catalog audit'
+        required: true
+        default: 'validate-only'
+        type: choice
+        options:
+          - validate-only
+          - live-readonly-audit
+      confirm_qa_ref:
+        description: 'For live-readonly-audit only: type nsshdxxdvzzxlmdomixf to confirm target'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-readonly-parity-audit
+  cancel-in-progress: false
+
+jobs:
+  validate-qa-audit-tooling:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run local QA audit safety tests (no DB access)
+        run: npx vitest run scripts/qa/qa-audit.test.mjs
+
+      - name: Validate reference parser and SQL read-only guard offline
+        run: node scripts/qa/audit-qa-parity.cjs --validate-only
+
+  live-readonly-qa-audit:
+    needs: validate-qa-audit-tooling
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.mode == 'live-readonly-audit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify explicit QA project confirmation
+        env:
+          CONFIRM_QA_REF: ${{ inputs.confirm_qa_ref }}
+        run: |
+          if [[ "$CONFIRM_QA_REF" != "nsshdxxdvzzxlmdomixf" ]]; then
+            echo "FAIL: confirm_qa_ref must exactly match nsshdxxdvzzxlmdomixf."
+            exit 1
+          fi
+
+      - name: Verify QA read-only secret is configured without exposing value
+        env:
+          HAS_QA_RO_DB: ${{ secrets.QA_SUPABASE_READONLY_DB_URL != '' }}
+        run: |
+          if [[ "$HAS_QA_RO_DB" != "true" ]]; then
+            echo "FAIL: QA_SUPABASE_READONLY_DB_URL secret is not configured."
+            exit 1
+          fi
+
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure PostgreSQL client (psql) is installed
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+
+      - name: Run strictly read-only QA structural parity audit
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          QA_SUPABASE_PROJECT_REF: nsshdxxdvzzxlmdomixf
+          QA_SUPABASE_READONLY_DB_URL: ${{ secrets.QA_SUPABASE_READONLY_DB_URL }}
+          QA_SUPABASE_URL: ${{ vars.QA_SUPABASE_URL }}
+        run: |
+          node scripts/qa/audit-qa-parity.cjs --live \
+            --out-json qa-parity-report.json \
+            --out-md qa-parity-report.md
+
+      - name: Publish sanitized summary to GitHub Step Summary
+        if: always()
+        run: |
+          if [[ -f qa-parity-report.md ]]; then
+            cat qa-parity-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload non-secret catalog parity report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-readonly-parity-report
+          path: |
+            qa-parity-report.json
+            qa-parity-report.md
+          retention-days: 7
+          if-no-files-found: ignore
