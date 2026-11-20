@@ -1,0 +1,105 @@
+name: Deploy daily-reminders (Manual Only)
+
+# Manual-only deployment for ONLY the daily-reminders Edge Function.
+# - Locked to armshokri-debug/PUREFUNCTION-AISTUDIO (main) and Supabase rugwzvztweiffprkxfdc.
+# - Requires exact reviewed 40-char main commit SHA + explicit confirmation string.
+# - Does NOT touch EMAIL_FROM, SMTP, pg_cron, database migrations, backup workflows, or other Edge Functions.
+# - Does NOT use SUPABASE_DB_URL.
+# - Uses --no-verify-jwt while preserving in-function x-cron-secret validation.
+# - Never prints secrets or Vault values.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: 'Full 40-character main commit SHA reviewed for daily-reminders deploy'
+        required: true
+        type: string
+      confirm_deploy:
+        description: 'Type DEPLOY_DAILY_REMINDERS to confirm deploying ONLY daily-reminders'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-daily-reminders
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-verify-daily-reminders:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Enforce repository, branch, SHA, and explicit confirmation gates
+        env:
+          REPO_NAME: ${{ github.repository }}
+          REF_NAME: ${{ github.ref }}
+          ACTUAL_SHA: ${{ github.sha }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}
+          HAS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$REPO_NAME" != "armshokri-debug/PUREFUNCTION-AISTUDIO" ]]; then
+            echo "FAIL: This workflow may run only in armshokri-debug/PUREFUNCTION-AISTUDIO."
+            exit 1
+          fi
+          if [[ "$REF_NAME" != "refs/heads/main" ]]; then
+            echo "FAIL: Select branch main before running this workflow."
+            exit 1
+          fi
+          if [[ ! "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ || "$REVIEWED_SHA" != "$ACTUAL_SHA" ]]; then
+            echo "FAIL: reviewed_sha must match the exact 40-character main commit SHA."
+            exit 1
+          fi
+          if [[ "$CONFIRM_DEPLOY" != "DEPLOY_DAILY_REMINDERS" ]]; then
+            echo "FAIL: confirm_deploy must be exactly DEPLOY_DAILY_REMINDERS."
+            exit 1
+          fi
+          if [[ "$HAS_TOKEN" != "true" ]]; then
+            echo "FAIL: GitHub Actions secret SUPABASE_ACCESS_TOKEN is not configured."
+            exit 1
+          fi
+          echo "PASS: Repository, main branch, SHA, confirmation, and token presence gates satisfied."
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and verify daily-reminders automated tests
+        run: |
+          npm ci --legacy-peer-deps
+          npx vitest run src/lib/__tests__/emailFunctions.test.ts scripts/email/verify-daily-reminders.test.mjs
+
+      - name: Verify DAILY_REMINDERS_ENABLED=false secret digest before deploy
+        env:
+          SUPABASE_PROJECT_REF: rugwzvztweiffprkxfdc
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/email/verify-daily-reminders-paused.cjs --pre-deploy
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy ONLY daily-reminders Edge Function (--no-verify-jwt)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy daily-reminders \
+            --project-ref rugwzvztweiffprkxfdc \
+            --no-verify-jwt
+
+      - name: Verify deployed daily-reminders enforces x-cron-secret and returns paused=true (zero emails sent)
+        env:
+          SUPABASE_PROJECT_REF: rugwzvztweiffprkxfdc
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/email/verify-daily-reminders-paused.cjs --post-deploy
