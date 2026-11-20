@@ -96,7 +96,8 @@ jobs:
         run: |
           supabase functions deploy daily-reminders \
             --project-ref rugwzvztweiffprkxfdc \
-            --no-verify-jwt
+            --no-verify-jwt \
+            --yes
 
       - name: Verify deployed daily-reminders enforces x-cron-secret and returns paused=true (zero emails sent)
         env:
