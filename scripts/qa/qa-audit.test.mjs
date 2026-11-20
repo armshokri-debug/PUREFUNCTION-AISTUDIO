@@ -49,6 +49,7 @@ function buildMatchingLiveCatalog(reference, { storageBucketsAccessible = true }
       rolsuper: false,
       rolcreaterole: false,
       rolcreatedb: false,
+      rolbypassrls: false,
       has_pg_read_all_data: false,
       storage_buckets_accessible: storageBucketsAccessible
     },
@@ -120,13 +121,20 @@ describe('qa-guard — strict QA targeting and Production rejection', () => {
     });
 
     // Reject Production direct & pooler URLs
-    const prodDirect = `postgresql://supabase_read_only_user:secret@db.${FORBIDDEN_PRODUCTION_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require`;
-    const prodPooler = `postgresql://supabase_read_only_user.${FORBIDDEN_PRODUCTION_PROJECT_REF}:secret@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require`;
+    const prodDirect = `postgresql://qa_readonly:secret@db.${FORBIDDEN_PRODUCTION_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require`;
+    const prodPooler = `postgresql://qa_readonly.${FORBIDDEN_PRODUCTION_PROJECT_REF}:secret@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require`;
     expect(() => validateQaReadOnlyDbUrl(prodDirect)).toThrow(/Production/i);
     expect(() => validateQaReadOnlyDbUrl(prodPooler)).toThrow(/Production/i);
 
-    // Reject privileged database roles (never fall back to postgres / admin roles)
-    for (const role of ['postgres', 'supabase_admin', 'service_role', 'authenticator', 'supabase_auth_admin']) {
+    // Reject privileged database roles including supabase_read_only_user (BYPASSRLS / pg_read_all_data)
+    for (const role of [
+      'postgres',
+      'supabase_admin',
+      'supabase_read_only_user',
+      'service_role',
+      'authenticator',
+      'supabase_auth_admin'
+    ]) {
       const privDirect = `postgresql://${role}:secret@db.${ALLOWED_QA_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require`;
       const privPooler = `postgresql://${role}.${ALLOWED_QA_PROJECT_REF}:secret@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require`;
       expect(() => validateQaReadOnlyDbUrl(privDirect)).toThrow(/privileged database role/i);
@@ -138,16 +146,16 @@ describe('qa-guard — strict QA targeting and Production rejection', () => {
     expect(() => validateQaReadOnlyDbUrl(randomRole)).toThrow(/not an approved read-only audit role/i);
 
     // Reject pooler username for another project
-    const wrongPooler = `postgresql://supabase_read_only_user.wrongprojectref0000:secret@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require`;
+    const wrongPooler = `postgresql://qa_readonly.wrongprojectref0000:secret@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require`;
     expect(() => validateQaReadOnlyDbUrl(wrongPooler)).toThrow(/scoped to QA project/i);
 
     // Reject arbitrary host
-    const wrongHost = 'postgresql://supabase_read_only_user:secret@localhost:5432/postgres?sslmode=require';
+    const wrongHost = 'postgresql://qa_readonly:secret@localhost:5432/postgres?sslmode=require';
     expect(() => validateQaReadOnlyDbUrl(wrongHost)).toThrow(/database host must target QA/i);
 
     // Reject insecure sslmode and empty password
-    const noSsl = `postgresql://supabase_read_only_user:secret@db.${ALLOWED_QA_PROJECT_REF}.supabase.co:5432/postgres?sslmode=disable`;
-    const noPass = `postgresql://supabase_read_only_user@db.${ALLOWED_QA_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require`;
+    const noSsl = `postgresql://qa_readonly:secret@db.${ALLOWED_QA_PROJECT_REF}.supabase.co:5432/postgres?sslmode=disable`;
+    const noPass = `postgresql://qa_readonly@db.${ALLOWED_QA_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require`;
     expect(() => validateQaReadOnlyDbUrl(noSsl)).toThrow(/insecure sslmode/i);
     expect(() => validateQaReadOnlyDbUrl(noPass)).toThrow(/must include a password/i);
 
@@ -254,6 +262,7 @@ describe('read-only SQL, Pooler compatibility, & runtime session safety guarante
     expect(CATALOG_AUDIT_SQL).toContain('pg_catalog.pg_attribute');
     expect(CATALOG_AUDIT_SQL).toContain('pg_catalog.pg_type');
     expect(CATALOG_AUDIT_SQL).toContain('pg_catalog.has_table_privilege');
+    expect(CATALOG_AUDIT_SQL).toContain('r.rolbypassrls');
 
     // Must never query customer tables, Auth user rows, storage objects, or Vault secrets
     expect(CATALOG_AUDIT_SQL).not.toMatch(/\b(?:FROM|JOIN)\s+(?:public|private|auth|vault)\./i);
@@ -321,7 +330,7 @@ describe('read-only SQL, Pooler compatibility, & runtime session safety guarante
     }
   });
 
-  it('verifies runtime PostgreSQL session confirms read-only transaction, non-privileged role, and NO pg_read_all_data', () => {
+  it('verifies runtime PostgreSQL session confirms read-only transaction, rolbypassrls=false, non-privileged role, and NO pg_read_all_data', () => {
     expect(
       assertRuntimeReadOnlySession({
         current_user: 'qa_readonly',
@@ -330,14 +339,44 @@ describe('read-only SQL, Pooler compatibility, & runtime session safety guarante
         rolsuper: false,
         rolcreaterole: false,
         rolcreatedb: false,
+        rolbypassrls: false,
         has_pg_read_all_data: false
       })
     ).toEqual({
       currentUser: 'qa_readonly',
       transactionReadOnly: 'on',
       statementTimeout: '15s',
+      rolbypassrls: false,
       hasPgReadAllData: false
     });
+
+    // Reject BYPASSRLS = true or missing/unknown/non-boolean values (fail-closed)
+    for (const badBypassRls of [true, undefined, null, 'false']) {
+      expect(() =>
+        assertRuntimeReadOnlySession({
+          current_user: 'qa_readonly',
+          transaction_read_only: 'on',
+          rolsuper: false,
+          rolcreaterole: false,
+          rolcreatedb: false,
+          rolbypassrls: badBypassRls,
+          has_pg_read_all_data: false
+        })
+      ).toThrow(/rolbypassrls=false|BYPASSRLS/i);
+    }
+
+    // Reject supabase_read_only_user even if flags were spoofed
+    expect(() =>
+      assertRuntimeReadOnlySession({
+        current_user: 'supabase_read_only_user',
+        transaction_read_only: 'on',
+        rolsuper: false,
+        rolcreaterole: false,
+        rolcreatedb: false,
+        rolbypassrls: false,
+        has_pg_read_all_data: false
+      })
+    ).toThrow(/not an approved read-only role/i);
 
     expect(() =>
       assertRuntimeReadOnlySession({
@@ -346,6 +385,7 @@ describe('read-only SQL, Pooler compatibility, & runtime session safety guarante
         rolsuper: false,
         rolcreaterole: false,
         rolcreatedb: false,
+        rolbypassrls: false,
         has_pg_read_all_data: false
       })
     ).toThrow(/transaction_read_only=on/i);
@@ -357,6 +397,7 @@ describe('read-only SQL, Pooler compatibility, & runtime session safety guarante
         rolsuper: false,
         rolcreaterole: false,
         rolcreatedb: false,
+        rolbypassrls: false,
         has_pg_read_all_data: true
       })
     ).toThrow(/pg_read_all_data/i);
@@ -368,6 +409,7 @@ describe('read-only SQL, Pooler compatibility, & runtime session safety guarante
         rolsuper: true,
         rolcreaterole: true,
         rolcreatedb: true,
+        rolbypassrls: true,
         has_pg_read_all_data: false
       })
     ).toThrow(/privileged attributes/i);

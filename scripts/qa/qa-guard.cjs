@@ -35,6 +35,7 @@ const FORBIDDEN_PRIVILEGED_DB_ROLES = Object.freeze(
     'supabase_storage_admin',
     'supabase_functions_admin',
     'supabase_replication_admin',
+    'supabase_read_only_user',
     'service_role',
     'authenticator',
     'dashboard_user',
@@ -48,8 +49,10 @@ const FORBIDDEN_PRIVILEGED_DB_ROLES = Object.freeze(
 
 /**
  * Explicitly permitted base role names for the read-only QA audit connection.
+ * supabase_read_only_user is explicitly excluded and forbidden because in
+ * Supabase it carries BYPASSRLS and pg_read_all_data.
  */
-const ALLOWED_READONLY_ROLE_PATTERN = /^(qa_readonly(?:_user)?|qa_catalog_readonly|readonly(?:_user)?|supabase_read_only_user)$/i;
+const ALLOWED_READONLY_ROLE_PATTERN = /^(qa_readonly(?:_user)?|qa_catalog_readonly|readonly(?:_user)?)$/i;
 
 /**
  * Allowed TLS modes for PostgreSQL read-only connections.
@@ -346,7 +349,7 @@ function validateQaReadOnlyDbUrl(rawUrl, expectedProjectRef = ALLOWED_QA_PROJECT
   );
   assertGuard(
     ALLOWED_READONLY_ROLE_PATTERN.test(baseRole),
-    `Blocked: database role "${baseRole}" is not an approved read-only audit role (expected supabase_read_only_user or qa_readonly).`
+    `Blocked: database role "${baseRole}" is not an approved read-only audit role (expected qa_readonly or qa_catalog_readonly).`
   );
 
   const sslmode = (parsed.searchParams.get('sslmode') || '').trim().toLowerCase();
@@ -559,6 +562,10 @@ function assertRuntimeReadOnlySession(sessionInfo) {
     'Blocked: live database role holds privileged attributes (superuser/createrole/createdb).'
   );
   assertGuard(
+    sessionInfo.rolbypassrls === false,
+    'Blocked: live audit role must explicitly confirm rolbypassrls=false (BYPASSRLS or unknown value is forbidden).'
+  );
+  assertGuard(
     sessionInfo.has_pg_read_all_data === false,
     'Blocked: live audit role must NOT hold pg_read_all_data; use a least-privilege catalog-only role.'
   );
@@ -578,6 +585,7 @@ function assertRuntimeReadOnlySession(sessionInfo) {
     currentUser: baseRole,
     transactionReadOnly: 'on',
     statementTimeout: sessionInfo.statement_timeout || null,
+    rolbypassrls: false,
     hasPgReadAllData: false
   };
 }

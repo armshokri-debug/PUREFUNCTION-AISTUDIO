@@ -40,6 +40,7 @@ SELECT json_build_object(
       'rolsuper', r.rolsuper,
       'rolcreaterole', r.rolcreaterole,
       'rolcreatedb', r.rolcreatedb,
+      'rolbypassrls', r.rolbypassrls,
       'has_pg_read_all_data', CASE
         WHEN EXISTS (SELECT 1 FROM pg_catalog.pg_roles pr WHERE pr.rolname = 'pg_read_all_data')
           THEN pg_catalog.pg_has_role(current_user, 'pg_read_all_data', 'MEMBER')
