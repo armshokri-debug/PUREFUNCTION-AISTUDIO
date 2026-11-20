@@ -1,0 +1,49 @@
+name: Verify daily-reminders safety (No Deploy)
+
+# Safe read-only operational verification. Never deploys functions, runs SQL,
+# reads Vault values or calls daily-reminders with a valid cron secret.
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/email/verify-daily-reminders-paused.cjs
+      - .github/workflows/verify-daily-reminders-safety.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-daily-reminders-safety
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: ${{ github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Confirm token exists without exposing its value
+        env:
+          HAS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+        run: |
+          if [[ "$HAS_TOKEN" != "true" ]]; then
+            echo "FAIL: SUPABASE_ACCESS_TOKEN is not configured."
+            exit 1
+          fi
+
+      - name: Verify pause configuration and auth gate (no SQL, no emails, no deploy)
+        env:
+          SUPABASE_PROJECT_REF: rugwzvztweiffprkxfdc
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/email/verify-daily-reminders-paused.cjs --post-deploy
