@@ -99,7 +99,7 @@ jobs:
             --no-verify-jwt \
             --yes
 
-      - name: Verify deployed daily-reminders enforces x-cron-secret and returns paused=true (zero emails sent)
+      - name: Verify deployed pause configuration, active status and 401 auth gate (zero emails sent)
         env:
           SUPABASE_PROJECT_REF: rugwzvztweiffprkxfdc
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
