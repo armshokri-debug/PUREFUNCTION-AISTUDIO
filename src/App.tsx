@@ -5,7 +5,7 @@ import { PostureReports } from './components/PostureReports';
 import { supabase } from './cloud/supabase';
 import { ProfilePhotoButton } from './components/client/ProfilePhotoButton';
 import { useSession, Profile } from './cloud/Session';
-import { AuthScreen, LoadingScreen, NewPasswordScreen, NoAccessScreen } from './cloud/AuthScreen';
+import { AuthScreen, LoadingScreen, NewPasswordScreen, ResetCompleteScreen, NoAccessScreen } from './cloud/AuthScreen';
 import { ClientsStore, SyncState, useCloudClientsStore, useLocalClientsStore } from './cloud/useClientsStore';
 import { ExerciseLibraryProvider } from './state/ExerciseLibrary';
 import { ReferView } from './components/client/ReferView';
@@ -84,6 +84,7 @@ export default function App() {
   if (status === 'signed-out') return <SignedOut />;
   if (status === 'no-access') return <NoAccessScreen />;
   if (status === 'reset') return <NewPasswordScreen />;
+  if (status === 'reset-complete') return <ResetCompleteScreen />;
   return <CloudApp key={profile!.id} profile={profile!} />;
 }
 
