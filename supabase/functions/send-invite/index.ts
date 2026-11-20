@@ -1,6 +1,6 @@
 // Coach-only: email a client their invite link (verify_jwt = true).
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
-import { APP_URL, CooldownTracker, sendEmail } from '../_shared/email.ts';
+import { APP_URL, CooldownTracker, sendTransactionalEmail } from '../_shared/email.ts';
 import { handleSendInvite } from './handler.ts';
 
 const inviteCooldown = new CooldownTracker();
@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
   return handleSendInvite(req, {
     appUrl: APP_URL,
     cooldown: inviteCooldown,
-    sendEmail,
+    sendEmail: sendTransactionalEmail,
     getUserByToken: async (token) => {
       const { data } = await admin.auth.getUser(token);
       return data.user ? { id: data.user.id } : null;
