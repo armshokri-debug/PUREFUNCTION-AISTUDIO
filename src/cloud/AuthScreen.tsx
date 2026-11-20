@@ -232,27 +232,38 @@ export const AuthScreen: React.FC = () => {
   );
 };
 
-/** Shown after opening the emailed reset link. */
+/** A recovery link authorizes a temporary Supabase session; it is NOT a login. */
 export const NewPasswordScreen: React.FC = () => {
   const { setNewPassword, signOut } = useSession();
   const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (busy) return;
+    setError(null);
+    if (password.length < 8 || password.length > 72) {
+      setError('Password must be 8 to 72 characters.');
+      return;
+    }
+    if (password !== confirmation) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    const err = await setNewPassword(password);
+    setBusy(false);
+    if (err) setError(err);
+  };
+
   return (
     <Shell>
       <h1 className="text-2xl font-bold tracking-tight text-[#111827] mb-1">Choose a new password</h1>
-      <p className="text-sm text-gray-500 mb-6">At least 8 characters. You’ll stay signed in.</p>
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setError(null);
-          setBusy(true);
-          const err = await setNewPassword(password);
-          setBusy(false);
-          if (err) setError(err);
-        }}
-        className="space-y-3"
-      >
+      <p className="text-sm text-gray-500 mb-6">
+        Enter and confirm a new password (8–72 characters). Your password only changes when you tap Save new password.
+      </p>
+      <div className="space-y-3">
         <input
           type="password"
           value={password}
@@ -260,7 +271,21 @@ export const NewPasswordScreen: React.FC = () => {
           placeholder="New password"
           aria-label="New password"
           autoComplete="new-password"
-          required
+          minLength={8}
+          maxLength={72}
+          disabled={busy}
+          className={input}
+        />
+        <input
+          type="password"
+          value={confirmation}
+          onChange={(e) => setConfirmation(e.target.value)}
+          placeholder="Confirm new password"
+          aria-label="Confirm new password"
+          autoComplete="new-password"
+          minLength={8}
+          maxLength={72}
+          disabled={busy}
           className={input}
         />
         {error && (
@@ -270,16 +295,47 @@ export const NewPasswordScreen: React.FC = () => {
           </div>
         )}
         <button
-          type="submit"
-          disabled={busy}
+          type="button"
+          onClick={() => void save()}
+          disabled={busy || !password || !confirmation}
           className="w-full inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] disabled:opacity-60 text-white text-base font-semibold py-3.5 rounded-xl cursor-pointer"
         >
           {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-          Save password
+          Save new password
         </button>
-      </form>
-      <button onClick={() => void signOut()} className="w-full text-sm font-medium text-gray-500 py-2 mt-2 cursor-pointer">
-        Cancel
+      </div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void signOut()}
+        className="w-full text-sm font-medium text-gray-500 py-2 mt-2 cursor-pointer"
+      >
+        Cancel recovery
+      </button>
+    </Shell>
+  );
+};
+
+/** Shown ONLY after Supabase confirms updateUser, followed by sign-out. */
+export const ResetCompleteScreen: React.FC = () => {
+  const { finishRecovery, notice } = useSession();
+  return (
+    <Shell>
+      <div className="flex items-center gap-2 text-green-700 mb-3" role="status">
+        <CheckCircle2 className="w-5 h-5" />
+        <span className="font-semibold">Password updated successfully</span>
+      </div>
+      <h1 className="text-2xl font-bold tracking-tight text-[#111827] mb-2">Your password is saved</h1>
+      <p className="text-sm text-gray-600 mb-5">
+        For your security, sign in again with the new password. This also verifies it works on another device.
+      </p>
+      {notice && <p role="alert" className="text-sm text-red-700 mb-4">{notice}</p>}
+      <button
+        type="button"
+        onClick={finishRecovery}
+        className="w-full bg-[#111827] text-white text-base font-semibold py-3.5 rounded-xl cursor-pointer"
+      >
+        Sign in with new password
       </button>
     </Shell>
   );
