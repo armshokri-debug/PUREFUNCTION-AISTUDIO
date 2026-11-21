@@ -3,6 +3,7 @@ import { Check, Copy, X, AlertCircle, Mail, Loader2 } from 'lucide-react';
 import { ClientProfile } from '../../types';
 import { isCloud } from '../../cloud/supabase';
 import { sendInviteEmail } from '../../cloud/email';
+import { emailCooldownKey } from '../../../supabase/functions/_shared/google-email-alias';
 
 export function inviteLink(email: string): string {
   const base = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`;
@@ -33,7 +34,8 @@ export const ClientInviteModal: React.FC<{
   const save = () => {
     if (!name.trim()) return setError('Enter a name.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Enter a valid email.');
-    if (clients.some((c) => c.id !== client.id && (c.email ?? '').trim().toLowerCase() === cleanEmail)) {
+    if (joined && cleanEmail !== savedEmail) return setError('An active account email cannot be edited here. Use a verified email change instead.');
+    if (clients.some((c) => c.id !== client.id && emailCooldownKey(c.email ?? '') === emailCooldownKey(cleanEmail))) {
       return setError('Another client already uses this email.');
     }
     onSave({ ...client, name: name.trim(), email: cleanEmail, emailReminders: reminders });
@@ -94,16 +96,17 @@ export const ClientInviteModal: React.FC<{
             }`}
           >
             {joined
-              ? 'Account active — this client has signed up.'
+              ? 'Account active — email verified.'
               : 'Not joined yet — send them the invite below.'}
           </div>
         )}
 
         <label className="block text-xs font-medium text-gray-600 mb-1.5">Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={`${field} mb-3`} />
-        <label className="block text-xs font-medium text-gray-600 mb-1.5">Email (they sign in with this)</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1.5">Client email</label>
         <input
           type="email"
+          disabled={joined === true}
           value={email}
           onChange={(e) => {
             setEmail(e.target.value);
@@ -145,25 +148,31 @@ export const ClientInviteModal: React.FC<{
               {mailing === 'sent' ? `Invite sent to ${client.email}` : 'Email the invite'}
             </button>
           )}
-          <div className="text-xs font-semibold text-[#111827] mb-1">{isCloud && !joined ? '…or share the link yourself' : 'Invite link'}</div>
-          <div className="text-xs text-gray-600 break-all mb-3">{link}</div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => void copy('link')}
-              className="inline-flex items-center justify-center gap-1.5 bg-white border border-gray-200 text-sm font-semibold py-2.5 rounded-xl cursor-pointer"
-            >
-              {copied === 'link' ? <Check className="w-4 h-4 text-[#16A34A]" /> : <Copy className="w-4 h-4" />}
-              {copied === 'link' ? 'Copied' : 'Copy link'}
-            </button>
-            <button
-              onClick={() => void copy('message')}
-              className="inline-flex items-center justify-center gap-1.5 bg-white border border-gray-200 text-sm font-semibold py-2.5 rounded-xl cursor-pointer"
-            >
-              {copied === 'message' ? <Check className="w-4 h-4 text-[#16A34A]" /> : <Copy className="w-4 h-4" />}
-              {copied === 'message' ? 'Copied' : 'Copy message'}
-            </button>
-          </div>
-          <p className="text-[11px] text-gray-500 mt-2">Save first if you changed the email, then copy.</p>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs text-gray-500">Advanced: manual setup link (requires a second verification email)</summary>
+            <div className="mt-2">
+            <div className="text-xs font-semibold text-[#111827] mb-1">{isCloud && !joined ? '…or share the link yourself' : 'Invite link'}</div>
+            <div className="text-xs text-gray-600 break-all mb-3">{link}</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => void copy('link')}
+                className="inline-flex items-center justify-center gap-1.5 bg-white border border-gray-200 text-sm font-semibold py-2.5 rounded-xl cursor-pointer"
+              >
+                {copied === 'link' ? <Check className="w-4 h-4 text-[#16A34A]" /> : <Copy className="w-4 h-4" />}
+                {copied === 'link' ? 'Copied' : 'Copy link'}
+              </button>
+              <button
+                onClick={() => void copy('message')}
+                className="inline-flex items-center justify-center gap-1.5 bg-white border border-gray-200 text-sm font-semibold py-2.5 rounded-xl cursor-pointer"
+              >
+                {copied === 'message' ? <Check className="w-4 h-4 text-[#16A34A]" /> : <Copy className="w-4 h-4" />}
+                {copied === 'message' ? 'Copied' : 'Copy message'}
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 mt-2">Save first if you changed the email, then copy.</p>
+  
+            </div>
+          </details>
         </div>
 
         {error && (
