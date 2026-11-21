@@ -1,4 +1,5 @@
 import { CooldownTracker, cors, isValidEmail, json, layout, type SendEmailOptions, type SendResult } from '../_shared/email-core.ts';
+import { alternateGoogleMailDomain, emailCooldownKey } from '../_shared/google-email-alias.ts';
 
 export const INVITE_COOLDOWN_MS = 60_000;
 
@@ -15,6 +16,10 @@ export interface SendInviteDeps {
   getCoachProfile: (uid: string) => Promise<{ role?: string | null; display_name?: string | null } | null>;
   getOwnedClient: (token: string, clientId: string) => Promise<SendInviteClientRow | null>;
   isClientAccountConfirmed: (clientId: string) => Promise<boolean>;
+  getInviteAccountState: (email: string) => Promise<'absent' | 'pending' | 'confirmed'>;
+  generateInviteLink: (email: string, displayName: string) => Promise<{ hashedToken?: string; userId?: string; error?: { message: string } | null }>;
+  generateExistingLink: (email: string) => Promise<{ hashedToken?: string; error?: { message: string } | null }>;
+  deleteNewInviteUser: (userId: string) => Promise<void>;
   sendEmail: (to: string, subject: string, html: string, options?: SendEmailOptions) => Promise<SendResult>;
   cooldown?: CooldownTracker;
   now?: () => number;
@@ -52,15 +57,36 @@ export async function handleSendInvite(req: Request, deps: SendInviteDeps): Prom
   }
 
   const now = deps.now ? deps.now() : Date.now();
-  const cooldownKey = `${uid}:${client.id}:${clientEmail}`;
+  const cooldownKey = `${uid}:${client.id}:${emailCooldownKey(clientEmail)}`;
   if (deps.cooldown?.isActive(cooldownKey, INVITE_COOLDOWN_MS, now)) {
     return json(429, { error: 'An invite was just sent to this client. Wait a minute before sending again.' });
   }
 
   const name = String(client.data?.name ?? '').trim().split(/\s+/)[0] || 'there';
   const coach = String(me.display_name ?? '').trim() || 'Your coach';
+
+  // A verified email is the identity. Do not issue password-set links for
+  // confirmed users, or silently attach a different Gmail alias to this row.
+  const state = await deps.getInviteAccountState(clientEmail);
+  if (state === 'confirmed') return json(409, { error: 'This email already has an account. Ask the client to sign in.' });
+  const alias = alternateGoogleMailDomain(clientEmail);
+  if (alias && await deps.getInviteAccountState(alias) !== 'absent') {
+    return json(409, { error: 'An account already uses the alternate Gmail address. Check for duplicate client records before inviting.' });
+  }
+
+  // Invite token proves email ownership in one step. The recipient creates a
+  // password inside the authenticated invite session, with no second email.
+  let userId: string | undefined;
+  const linkResult = state === 'pending'
+    ? await deps.generateExistingLink(clientEmail)
+    : await deps.generateInviteLink(clientEmail, String(client.data?.name ?? '').trim());
+  if (linkResult.error || !linkResult.hashedToken) {
+    return json(503, { error: 'Could not prepare the invitation. Please retry.' });
+  }
+  if (state === 'absent') userId = 'userId' in linkResult ? linkResult.userId : undefined;
   const link = new URL(deps.appUrl);
-  link.searchParams.set('join', clientEmail);
+  link.searchParams.set('invite', linkResult.hashedToken);
+  link.searchParams.set('inviteType', state === 'pending' ? 'magiclink' : 'invite');
 
   const r = await deps.sendEmail(
     clientEmail,
@@ -68,16 +94,21 @@ export async function handleSendInvite(req: Request, deps: SendInviteDeps): Prom
     layout(
       `Hi ${name}, your training is ready`,
       [
-        `${coach} set up your program in Pure Function.`,
-        `Tap the button, choose a password, and you’ll see your workouts. Your email (${clientEmail}) is already filled in.`
+        `${coach} invited you to Pure Function.`,
+        'Open this secure link, choose a password, and go straight to your workouts. No second verification email is required.'
       ],
-      { text: 'Set up my account', url: link.toString() }
+      { text: 'Accept invitation', url: link.toString() }
     )
   );
 
   if (r.ok) {
     deps.cooldown?.mark(cooldownKey, INVITE_COOLDOWN_MS, now);
     return json(200, { ok: true });
+  }
+  // An undelivered new invitation must not strand a new Auth account.
+  // Never delete an account that existed before this request.
+  if (userId) {
+    try { await deps.deleteNewInviteUser(userId); } catch { /* alert operators separately */ }
   }
   return json(r.status, { error: r.error });
 }
