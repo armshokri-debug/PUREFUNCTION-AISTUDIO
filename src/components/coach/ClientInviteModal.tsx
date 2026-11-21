@@ -35,6 +35,7 @@ export const ClientInviteModal: React.FC<{
   const save = () => {
     if (!name.trim()) return setError('Enter a name.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Enter a valid email.');
+    if (joined && cleanEmail !== savedEmail) return setError('An active account email cannot be changed here. Use a verified email-change process.');
     if (clients.some((c) => c.id !== client.id && emailCooldownKey(c.email ?? '') === emailCooldownKey(cleanEmail))) {
       return setError('This Gmail address already belongs to another client.');
     }
@@ -132,6 +133,7 @@ export const ClientInviteModal: React.FC<{
         <label className="block text-xs font-medium text-gray-600 mb-1.5">Email (they sign in with this)</label>
         <input
           type="email"
+          disabled={joined === true}
           value={email}
           onChange={(e) => {
             setEmail(e.target.value);
