@@ -47,7 +47,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const filteredClients = clients.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.phaseName.toLowerCase().includes(searchQuery.toLowerCase())
+      c.phaseName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleCreateClient = (e: React.FormEvent) => {
@@ -175,6 +176,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         ) : (
           filteredClients.map((client) => {
             const isSelected = client.id === selectedClientId;
+            const duplicatedMailbox = clients.some(c => c.id !== client.id && emailCooldownKey(c.email ?? '') === emailCooldownKey(client.email ?? ''));
             return (
               <div
                 key={client.id}
@@ -194,6 +196,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       Phase {client.phaseNumber} · {client.phaseName}
                     </span>
                     {client.isTestClient && <span className="text-xs font-bold rounded-full bg-[#FEF3C7] px-3 py-1">DEMO — NOT REAL</span>}
+                    {duplicatedMailbox && <span className="text-xs font-semibold text-red-700" title="These client records share the same Gmail mailbox. Review before inviting.">Duplicate email · review</span>}
                     {joinedIds && !joinedIds.has(client.id) && !client.isTestClient && (
                       <button
                         onClick={(e) => {
