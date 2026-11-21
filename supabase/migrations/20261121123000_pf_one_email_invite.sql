@@ -35,3 +35,20 @@ as $$
 $$;
 revoke execute on function public.pf_joined_client_ids() from public, anon;
 grant execute on function public.pf_joined_client_ids() to authenticated;
+
+-- A confirmed email without a chosen password must not bypass the
+-- invitation screen by opening the app in a separate tab.
+create or replace function public.pf_my_password_ready()
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $password_ready$
+  select exists (
+    select 1 from auth.users u
+    where u.id = auth.uid()
+      and u.email_confirmed_at is not null
+      and pg_catalog.length(coalesce(u.encrypted_password, '')) > 0
+  );
+$password_ready$;
+revoke execute on function public.pf_my_password_ready() from public, anon;
+grant execute on function public.pf_my_password_ready() to authenticated;
