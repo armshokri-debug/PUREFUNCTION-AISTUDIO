@@ -73,14 +73,15 @@ export async function handleSignUp(req: Request, deps: SignUpDeps): Promise<Resp
 
   // Look up only the two Google-owned domain spellings. Never manufacture an
   // account under the other spelling when an Auth account already exists.
-  const findExistingEmail = async (): Promise<string | null> => {
+  const findExistingEmail = async (): Promise<{ address: string | null; failed: boolean }> => {
     const current = await deps.isExistingSignupAccount(email);
-    if (current.error) return null; // fail closed if the database is unavailable
-    if (current.data === true) return email;
+    if (current.error) return { address: null, failed: true };
+    if (current.data === true) return { address: email, failed: false };
     const alternate = alternateGoogleMailDomain(email);
-    if (!alternate) return null;
+    if (!alternate) return { address: null, failed: false };
     const other = await deps.isExistingSignupAccount(alternate);
-    return !other.error && other.data === true ? alternate : null;
+    if (other.error) return { address: null, failed: true };
+    return { address: other.data === true ? alternate : null, failed: false };
   };
 
   const resend = async (recipient: string) => {
@@ -98,9 +99,12 @@ export async function handleSignUp(req: Request, deps: SignUpDeps): Promise<Resp
   };
 
   // Never leak which spelling exists, even on an explicit resend request.
-  const existingEmail = await findExistingEmail();
-  if (action === 'resend') return existingEmail ? resend(existingEmail) : generic();
-  if (existingEmail) return resend(existingEmail);
+  const existing = await findExistingEmail();
+  if (existing.failed) {
+    return action === 'resend' ? generic() : json(503, { error: 'Verification is temporarily unavailable.' });
+  }
+  if (action === 'resend') return existing.address ? resend(existing.address) : generic();
+  if (existing.address) return resend(existing.address);
 
   let registrationEmail = email;
   let { data: role, error: roleError } = await deps.getSignupRole(registrationEmail);
