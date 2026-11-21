@@ -487,7 +487,7 @@ const today = iso(new Date());
   await C.getByPlaceholder('jordan.taylor@example.com').fill('casey.pri@example.invalid');
   await C.locator('form button[type=submit]').click();
   await C.waitForTimeout(800);
-  await C.getByRole('button', { name: 'Cancel' }).click();
+  await C.getByRole('button', { name: 'Close', exact: true }).last().click();
   await C.waitForTimeout(800);
   const caseyRow = mock.db.clients.find((c) => c.email === 'casey.pri@example.invalid');
   ok(!!caseyRow, 'pri: created second synthetic client for isolation check');
