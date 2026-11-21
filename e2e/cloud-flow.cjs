@@ -108,7 +108,7 @@ const today = iso(new Date());
   ok(mock.db.emails.some((e) => e.kind === 'invite' && e.to === 'ryan@example.com'), 'coach emails the invite in one tap');
   await C.getByRole('button', { name: 'Edit details or share a link' }).click();
   await C.getByLabel('Morning email on workout days').uncheck();
-  await C.getByRole('button', { name: 'Save', exact: true }).click();
+  await C.getByRole('button', { name: 'Save changes' }).click();
   await C.waitForTimeout(1200);
   ok(mock.db.clients.find((c) => c.id === ryanRow.id).data.emailReminders === false, 'coach can turn off morning emails for a client');
 
