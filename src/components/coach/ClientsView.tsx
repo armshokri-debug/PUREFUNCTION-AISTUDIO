@@ -75,7 +75,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     setNewEmail('');
     setIsAddModalOpen(false);
     // Cloud: right after adding, show the invite to send (like TrueCoach)
-    if (newId && joinedIds) setInviteFor(newId);
+    if (newId && isCloud) setInviteFor(newId);
   };
 
   // Real numbers: clients, assessments due within 5 days, workouts completed this week
