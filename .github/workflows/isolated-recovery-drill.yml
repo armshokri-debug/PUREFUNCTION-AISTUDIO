@@ -149,8 +149,22 @@ jobs:
                 echo "BLOCKED: $name, missing local extension"
               elif grep -qi 'function .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
                 echo "BLOCKED: $name, missing local function dependency"
+              elif grep -qi 'schema .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, missing local schema"
+              elif grep -qi 'type .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, missing PostgreSQL type"
+              elif grep -qi 'relation .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, missing local relation"
+              elif grep -qi 'already exists' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, conflicting local object"
+              elif grep -qi 'unrecognized configuration parameter' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, missing PostgreSQL setting"
+              elif grep -qi 'permission denied\|must be owner\|must be superuser' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, local database permission"
+              elif grep -qi 'could not open extension control file' "$RUNNER_TEMP/restore-error.txt"; then
+                echo "BLOCKED: $name, missing extension control"
               else
-                echo "BLOCKED: $name, restore failed; details suppressed to protect user data"
+                echo "BLOCKED: $name, unexpected isolated restore error"
               fi
               exit 1
             fi
