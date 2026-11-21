@@ -13,6 +13,7 @@ export interface SendInviteClientRow {
 export interface ExistingInviteAccount {
   email: string;
   confirmed: boolean;
+  hasPassword: boolean;
 }
 
 /** The one email is the ownership proof; no second sign-up verification is required. */
@@ -77,7 +78,7 @@ export async function handleSendInvite(req: Request, deps: SendInviteDeps): Prom
     existing = await deps.getExistingAccount(alias);
     if (existing.error) return json(503, { error: 'Could not check this invitation. Try again.' });
   }
-  if (existing.data?.confirmed) {
+  if (existing.data?.confirmed && existing.data.hasPassword) {
     return json(409, {
       error: 'An account already exists for this email. Ask the client to sign in. Contact support if their training is missing.'
     });
