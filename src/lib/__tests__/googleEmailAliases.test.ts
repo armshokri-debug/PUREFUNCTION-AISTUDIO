@@ -64,7 +64,7 @@ describe('Gmail alias support for recovery', () => {
         ? { hashedToken: 'recovery-token', error: null }
         : { hashedToken: undefined, error: { message: 'not found' } }
     );
-    const sendEmail = vi.fn(async () => ({ ok: true as const }));
+    const sendEmail = vi.fn(async (_to: string, _subject: string, _html: string) => ({ ok: true as const }));
     const deps = {
       appUrl: url, generateRecoveryLink, sendEmail, cooldown: new CooldownTracker(),
       now: () => 1_000_000, logWarn: vi.fn(), logInfo: vi.fn()
@@ -87,7 +87,7 @@ describe('Gmail alias support for recovery', () => {
     const generateRecoveryLink = vi.fn(async () => ({
       hashedToken: undefined, error: { message: 'not found' }
     }));
-    const sendEmail = vi.fn(async () => ({ ok: true as const }));
+    const sendEmail = vi.fn(async (_to: string, _subject: string, _html: string) => ({ ok: true as const }));
     const deps = { appUrl: url, generateRecoveryLink, sendEmail, logWarn: vi.fn() };
     const result = await handleResetPassword(post('reset-password', { email: 'nobody@gmail.com' }), deps);
     expect(await result.json()).toEqual({ ok: true });
@@ -110,7 +110,7 @@ describe('Gmail alias support for sign-up & verification', () => {
     generateMagicLink: vi.fn(async () => ({ hashedToken: 'magic-hash', error: null })),
     generateSignupLink: vi.fn(async () => ({ hashedToken: 'signup-hash', userId: 'new-user', error: null })),
     deleteUser: vi.fn(async () => {}),
-    sendEmail: vi.fn(async () => ({ ok: true as const })),
+    sendEmail: vi.fn(async (_to: string, _subject: string, _html: string) => ({ ok: true as const })),
     logWarn: vi.fn()
   });
 
