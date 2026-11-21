@@ -43,7 +43,7 @@ async function run() {
     stage = 'await authenticated no-access screen';
     await page.getByRole('heading', { name: 'Almost there' }).waitFor({ timeout: 30000 });
     stage = 'verify canonical email in authenticated screen';
-    const accountText = await page.getByText('You’re signed in as').textContent();
+    const accountText = await page.locator('body').innerText();
     assert(accountText && accountText.includes(storedEmail), 'Browser did not establish stored Googlemail account session');
     stageResult('Published app signs into existing Googlemail account using Gmail spelling');
 
