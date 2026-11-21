@@ -1,7 +1,35 @@
 import { ClientProfile, MonthlyReportData } from '../types';
 import { WEIGHT_UNIT } from './units';
+import { alternateGoogleMailDomain, emailCooldownKey } from '../../supabase/functions/_shared/google-email-alias';
 
 const zero = (unit: string) => ({ week0: 0, current: 0, unit });
+
+/**
+ * Matches duplicate client emails including Google's gmail.com / googlemail.com
+ * domain equivalence, without altering dots, plus-tags, or other domains.
+ */
+export function findDuplicateClientByEmail<T extends Pick<ClientProfile, 'id' | 'email'>>(
+  clients: readonly T[],
+  rawEmail: string,
+  excludeClientId?: string
+): T | undefined {
+  const targetKey = emailCooldownKey(rawEmail);
+  if (!targetKey) return undefined;
+  return clients.find((client) => {
+    if (excludeClientId && client.id === excludeClientId) return false;
+    const existingKey = emailCooldownKey(client.email ?? '');
+    return Boolean(existingKey) && existingKey === targetKey;
+  });
+}
+
+export function duplicateClientEmailMessage(rawEmail: string, existingEmail?: string): string {
+  const clean = rawEmail.trim().toLowerCase();
+  const existing = (existingEmail ?? '').trim().toLowerCase();
+  if (clean !== existing && alternateGoogleMailDomain(clean) === existing) {
+    return 'This Gmail/Googlemail address already belongs to another client.';
+  }
+  return 'A client with this email already exists.';
+}
 
 function emptyReport(month: 1 | 2 | 3): MonthlyReportData {
   return {

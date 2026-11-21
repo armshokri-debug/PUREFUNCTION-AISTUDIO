@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { getClientStatus } from '../../components/coach/ClientsView';
-import { createClientProfile } from '../clients';
+import {
+  createClientProfile,
+  duplicateClientEmailMessage,
+  findDuplicateClientByEmail
+} from '../clients';
 
 function makeClient(overrides: Partial<ReturnType<typeof createClientProfile>> = {}) {
   return {
@@ -36,5 +40,37 @@ describe('ClientsView status classification', () => {
 
     const demo = makeClient({ isTestClient: true });
     expect(getClientStatus(demo, new Set()).label).toBe('Demo');
+  });
+});
+
+describe('Duplicate client email detection (Gmail & Googlemail)', () => {
+  it('blocks googlemail.com when gmail.com already exists and vice versa', () => {
+    const gmailClient = makeClient({ id: 'c1', email: 'alex.smith@gmail.com' });
+    const googlemailClient = makeClient({ id: 'c2', email: 'sam@googlemail.com' });
+
+    const hit1 = findDuplicateClientByEmail([gmailClient], '  ALEX.SMITH@googlemail.com ');
+    expect(hit1?.id).toBe('c1');
+    expect(duplicateClientEmailMessage('alex.smith@googlemail.com', hit1?.email)).toContain('Gmail/Googlemail');
+
+    const hit2 = findDuplicateClientByEmail([googlemailClient], 'sam@gmail.com');
+    expect(hit2?.id).toBe('c2');
+    expect(duplicateClientEmailMessage('sam@gmail.com', hit2?.email)).toContain('Gmail/Googlemail');
+  });
+
+  it('preserves dots, plus-tags, and non-Google domains', () => {
+    const clients = [
+      makeClient({ id: 'c1', email: 'alex.smith@gmail.com' }),
+      makeClient({ id: 'c2', email: 'alex@example.com' })
+    ];
+
+    expect(findDuplicateClientByEmail(clients, 'alexsmith@gmail.com')).toBeUndefined();
+    expect(findDuplicateClientByEmail(clients, 'alex.smith+2@gmail.com')).toBeUndefined();
+    expect(findDuplicateClientByEmail(clients, 'alex@example.org')).toBeUndefined();
+    expect(findDuplicateClientByEmail(clients, 'alex@example.com')?.id).toBe('c2');
+  });
+
+  it('excludes the client currently being edited', () => {
+    const client = makeClient({ id: 'c1', email: 'alex@gmail.com' });
+    expect(findDuplicateClientByEmail([client], 'alex@googlemail.com', 'c1')).toBeUndefined();
   });
 });

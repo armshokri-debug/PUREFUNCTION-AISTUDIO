@@ -692,9 +692,49 @@ const today = iso(new Date());
     'pri: writes go only to client assessment record, zero writes to secure notes or posture review/report tables'
   );
 
+  // Clients safety checks: Test Client hidden in cloud production, Gmail/Googlemail duplicate blocked, server-verified Delete Client
+  await goToClientsList();
+  ok((await C.getByRole('button', { name: '+ Test Client', exact: true }).count()) === 0, 'clients safety: + Test Client button is hidden in production cloud build');
+
+  // Add a Gmail client, verify Googlemail alias is rejected, then safely delete via server-verified delete-client
+  await C.getByRole('button', { name: 'Add client', exact: true }).first().click();
+  await C.getByPlaceholder('e.g., Jordan Taylor').fill('Alias Guard');
+  await C.getByPlaceholder('jordan.taylor@example.com').fill('alias.guard@gmail.com');
+  await C.locator('form').getByRole('button', { name: 'Add client', exact: true }).click();
+  await C.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await C.waitForTimeout(1000);
+  const aliasRow = mock.db.clients.find((c) => c.email === 'alias.guard@gmail.com');
+  ok(Boolean(aliasRow), 'clients safety: created Gmail client saved to cloud');
+
+  // Duplicate googlemail.com alias must be blocked
+  await C.getByRole('button', { name: 'Add client', exact: true }).first().click();
+  await C.getByPlaceholder('e.g., Jordan Taylor').fill('Alias Duplicate');
+  await C.getByPlaceholder('jordan.taylor@example.com').fill('alias.guard@googlemail.com');
+  await C.locator('form').getByRole('button', { name: 'Add client', exact: true }).click();
+  await C.getByText(/Gmail\/Googlemail address already belongs/i).waitFor();
+  ok(!mock.db.clients.some((c) => c.email === 'alias.guard@googlemail.com'), 'clients safety: googlemail duplicate of gmail client is blocked');
+  await C.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  // Seed a linked Auth account, workout, and storage file for Alias Guard, then delete via UI confirmation -> server delete-client
+  const aliasAuthId = 'alias-auth-uid';
+  mock.db.users.push({ id: aliasAuthId, email: 'alias.guard@gmail.com', password: 'Password123!', confirmed: true, meta: { display_name: 'Alias Guard' } });
+  mock.db.profiles.push({ id: aliasAuthId, role: 'client', display_name: 'Alias Guard', client_id: aliasRow.id });
+  mock.db.clientFiles[`${aliasRow.id}/clip.webm`] = { type: 'video/webm', body: Buffer.alloc(1) };
+
+  // Alias Guard is already selected in the detail panel; open its action menu and confirm deletion.
+  await C.getByRole('button', { name: /More actions for Alias Guard/i }).click();
+  await C.getByRole('menuitem', { name: 'Delete Client', exact: true }).click();
+  await C.getByLabel(/confirm permanent deletion/i).fill('Alias Guard');
+  await C.locator('[role="dialog"]').getByRole('button', { name: 'Delete Client', exact: true }).click();
+  await C.locator('[role="dialog"]').waitFor({ state: 'hidden' });
+  ok(mock.log.some((entry) => entry.startsWith('POST /functions/v1/delete-client')), 'clients safety: cloud deletion uses server-side delete-client function');
+  ok(!mock.db.clients.some((c) => c.id === aliasRow.id), 'clients safety: client row removed by server delete-client');
+  ok(!mock.db.users.some((u) => u.id === aliasAuthId) && !mock.db.profiles.some((p) => p.id === aliasAuthId), 'clients safety: linked client Auth account and profile removed');
+  ok(!mock.db.clientFiles[`${aliasRow.id}/clip.webm`], 'clients safety: client storage files cleaned up');
+
   // A stale coach editor must fail closed instead of replacing newer results.
-  await C.getByRole('button', { name: 'Clients', exact: true }).first().click();
-  if (!(await C.getByRole('button', { name: 'Exercises', exact: true }).count())) await C.locator('main').getByText('Ryan Lee', { exact: true }).first().click();
+  await goToClientsList();
+  await C.locator('main').getByText('Ryan Lee', { exact: true }).first().click();
   await C.getByRole('button', { name: 'Exercises', exact: true }).click();
   const serverWorkout = mock.db.workouts.find(x => x.id === w.id);
   const protectedReps = serverWorkout.data.blocks[0].reps;

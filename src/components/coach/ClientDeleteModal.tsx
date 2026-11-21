@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Archive, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Archive, Loader2, X } from 'lucide-react';
 import { ClientProfile } from '../../types';
 
 interface ClientDeleteModalProps {
   client: ClientProfile;
-  onConfirmDelete: (clientId: string) => void;
+  onConfirmDelete: (clientId: string, confirmName: string) => Promise<string | null> | string | null | void;
   onArchiveInstead?: (client: ClientProfile) => void;
   onClose: () => void;
 }
@@ -16,20 +16,36 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
   onClose
 }) => {
   const [confirmName, setConfirmName] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const isTest = Boolean(client.isTestClient);
   const canDelete = isTest || confirmName.trim().toLowerCase() === client.name.trim().toLowerCase();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canDelete) return;
-    onConfirmDelete(client.id);
-    onClose();
+    if (!canDelete || deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const err = await onConfirmDelete(client.id, confirmName.trim());
+      if (err) {
+        setDeleting(false);
+        setError(err);
+        return;
+      }
+      onClose();
+    } catch {
+      setDeleting(false);
+      setError('Could not delete this client safely. Try again.');
+    }
   };
 
   return (
     <div
       className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end sm:items-center justify-center sm:p-4"
-      onClick={onClose}
+      onClick={() => {
+        if (!deleting) onClose();
+      }}
     >
       <div
         role="dialog"
@@ -52,9 +68,10 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
           </div>
           <button
             type="button"
+            disabled={deleting}
             onClick={onClose}
             aria-label="Close"
-            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-[#111827] hover:bg-gray-100 cursor-pointer shrink-0"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-[#111827] hover:bg-gray-100 cursor-pointer shrink-0 disabled:opacity-40"
           >
             <X className="w-4 h-4" />
           </button>
@@ -67,16 +84,17 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
         ) : (
           <div className="space-y-3 mb-5">
             <p className="text-sm text-gray-600 leading-relaxed">
-              Deleting <span className="font-semibold text-[#111827]">{client.name}</span> permanently removes their profile and workout schedule. If you only want to hide them from your active list, archive them instead.
+              Deleting <span className="font-semibold text-[#111827]">{client.name}</span> permanently removes their profile, linked sign-in account, and workout schedule. If you only want to hide them from your active list, archive them instead.
             </p>
             {!client.archived && onArchiveInstead && (
               <button
                 type="button"
+                disabled={deleting}
                 onClick={() => {
                   onArchiveInstead(client);
                   onClose();
                 }}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-[#111827] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-[#111827] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-40"
               >
                 <Archive className="w-4 h-4 text-gray-600" />
                 <span>Archive instead (keep records)</span>
@@ -85,7 +103,7 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {!isTest && (
             <div>
               <label htmlFor="confirm-delete-name" className="block text-xs font-medium text-gray-600 mb-1.5">
@@ -95,28 +113,41 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
                 id="confirm-delete-name"
                 type="text"
                 value={confirmName}
-                onChange={(e) => setConfirmName(e.target.value)}
+                disabled={deleting}
+                onChange={(e) => {
+                  setConfirmName(e.target.value);
+                  if (error) setError(null);
+                }}
                 placeholder={client.name}
                 autoComplete="off"
-                className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-base sm:text-sm text-[#111827] focus:outline-none focus:border-red-500"
+                className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-base sm:text-sm text-[#111827] focus:outline-none focus:border-red-500 disabled:bg-gray-50"
               />
+            </div>
+          )}
+
+          {error && (
+            <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
             </div>
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
             <button
               type="button"
+              disabled={deleting}
               onClick={onClose}
-              className="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:text-[#111827] hover:bg-gray-100 transition-colors cursor-pointer"
+              className="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:text-[#111827] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-40"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={!canDelete}
-              className="min-h-[44px] px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-sm font-semibold transition-colors cursor-pointer"
+              disabled={!canDelete || deleting}
+              className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-sm font-semibold transition-colors cursor-pointer"
             >
-              Delete Client
+              {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
+              <span>{deleting ? 'Deleting…' : 'Delete Client'}</span>
             </button>
           </div>
         </form>

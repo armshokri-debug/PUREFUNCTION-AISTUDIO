@@ -3,6 +3,36 @@ import { EXERCISES_LIBRARY } from '../data/mockData';
 import { createClientProfile } from './clients';
 import { addDays, blankWorkout, defaultBlockFor, startOfWeek, todayISO } from './workouts';
 
+const PRODUCTION_SUPABASE_HOST = 'rugwzvztweiffprkxfdc.supabase.co';
+
+export interface TestClientEnv {
+  isCloud: boolean;
+  supabaseUrl?: string;
+  enableFlag?: string;
+}
+
+/**
+ * "+ Test Client" is strictly forbidden in Production.
+ * Allowed only in non-production test environments:
+ *  - Local demo mode (no cloud backend configured)
+ *  - Explicit test/QA cloud builds (VITE_ENABLE_TEST_CLIENT=true) targeting a
+ *    non-production Supabase project (never rugwzvztweiffprkxfdc.supabase.co).
+ */
+export function canCreateTestClient(
+  env: TestClientEnv = {
+    isCloud: Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY),
+    supabaseUrl: import.meta.env.VITE_SUPABASE_URL as string | undefined,
+    enableFlag: import.meta.env.VITE_ENABLE_TEST_CLIENT as string | undefined
+  }
+): boolean {
+  const normalizedUrl = (env.supabaseUrl ?? '').trim().toLowerCase();
+  if (normalizedUrl.includes(PRODUCTION_SUPABASE_HOST)) {
+    return false;
+  }
+  if (!env.isCloud) return true;
+  return env.enableFlag === 'true';
+}
+
 /** Obvious, unjoined sample; never uses a real email and can be deleted by the coach. */
 export function createTestClient(today: string = todayISO()): ClientProfile {
   const base = createClientProfile({

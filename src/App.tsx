@@ -12,7 +12,8 @@ import { ReferView } from './components/client/ReferView';
 import { ReferralLanding } from './components/ReferralLanding';
 import { ReferralsPanel } from './components/coach/ReferralsPanel';
 import { refCodeFromUrl } from './cloud/referrals';
-import { createClientProfile } from './lib/clients';
+import { deleteClientRemote } from './cloud/deleteClient';
+import { createClientProfile, findDuplicateClientByEmail } from './lib/clients';
 import {
   Users,
   BookOpen,
@@ -53,7 +54,7 @@ import { ClientDetail } from './components/coach/ClientDetail';
 import { ProgramsView } from './components/coach/ProgramsView';
 import { CoachMessages, ClientMessages, useUnreadCount } from './components/MessagesView';
 import { ProgramTemplate, applyProgramTemplate } from './lib/programTemplates';
-import { createTestClient } from './lib/testClient';
+import { canCreateTestClient, createTestClient } from './lib/testClient';
 import { NutritionTodayCard } from './components/NutritionPanel';
 import { CoachNotesCard } from './components/client/CoachNotesCard';
 import { ExerciseLibraryView } from './components/coach/ExerciseLibraryView';
@@ -269,12 +270,15 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
     setCoachTab('clients');
   };
 
+  const showTestClientButton = canCreateTestClient();
+
   const handleAddClient = (newClientData: {
     name: string;
     email: string;
     phaseNumber: 1 | 2 | 3 | 4;
     phaseName: ClientProfile['phaseName'];
   }) => {
+    if (findDuplicateClientByEmail(clients, newClientData.email)) return;
     const created = createClientProfile(newClientData);
     setClients((prev) => [created, ...prev]);
     setSelectedClientId(created.id);
@@ -282,29 +286,53 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   };
 
   const handleCreateTestClient = () => {
-    if (clients.some((c) => c.isTestClient)) return;
+    if (!showTestClientButton || clients.some((c) => c.isTestClient)) return;
     const sample = createTestClient();
     setClients((prev) => [sample, ...prev]);
     setSelectedClientId(sample.id);
   };
 
-  const handleDeleteTestClient = (id: string) => {
-    if (!clients.some((c) => c.id === id && c.isTestClient)) return;
-    setClients((prev) => prev.filter((c) => c.id !== id || !c.isTestClient));
+  const deleteClientRecord = async (
+    id: string,
+    opts: { isTestOnly?: boolean; confirmName?: string }
+  ): Promise<string | null> => {
+    const target = clients.find((c) => c.id === id);
+    if (!target) return 'Client not found.';
+    if (opts.isTestOnly && !target.isTestClient) return 'Only test clients can be deleted here.';
+
+    if (profile && supabase) {
+      const flushed = await store.flush();
+      if (!flushed) {
+        return 'Recent changes have not finished saving yet. Wait a moment and try again.';
+      }
+      const err = await deleteClientRemote({
+        clientId: id,
+        confirm: true,
+        confirmName: target.isTestClient ? undefined : opts.confirmName
+      });
+      if (err) return err;
+      store.forgetClient(id);
+      setJoinedIds((prev) => {
+        if (!prev || !prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } else {
+      store.forgetClient(id);
+    }
+
     if (selectedClientIdState === id) {
       setSelectedClientId('');
       setClientOpen(false);
     }
+    return null;
   };
 
-  const handleDeleteClient = (id: string) => {
-    if (!clients.some((c) => c.id === id)) return;
-    setClients((prev) => prev.filter((c) => c.id !== id));
-    if (selectedClientIdState === id) {
-      setSelectedClientId('');
-      setClientOpen(false);
-    }
-  };
+  const handleDeleteTestClient = (id: string) => deleteClientRecord(id, { isTestOnly: true });
+
+  const handleDeleteClient = (id: string, confirmName: string) =>
+    deleteClientRecord(id, { confirmName });
 
   const handleApplyTemplate = (template: ProgramTemplate, ids: string[], start: string) => {
     setClients((prev) => applyProgramTemplate(prev, template, ids, start).clients);
@@ -586,7 +614,8 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
                     onHighlightClient={setSelectedClientId}
                     onSelectClient={handleSelectClient}
                     onAddClient={handleAddClient}
-                    onCreateTestClient={handleCreateTestClient}
+                    showTestClientButton={showTestClientButton}
+                    onCreateTestClient={showTestClientButton ? handleCreateTestClient : undefined}
                     onDeleteClient={handleDeleteClient}
                     onDeleteTestClient={handleDeleteTestClient}
                     onUpdateClient={handleUpdateClient}

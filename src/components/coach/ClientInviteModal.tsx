@@ -3,7 +3,7 @@ import { Check, Copy, X, AlertCircle, Mail, Loader2 } from 'lucide-react';
 import { ClientProfile } from '../../types';
 import { isCloud } from '../../cloud/supabase';
 import { sendInviteEmail } from '../../cloud/email';
-import { emailCooldownKey } from '../../../supabase/functions/_shared/google-email-alias';
+import { duplicateClientEmailMessage, findDuplicateClientByEmail } from '../../lib/clients';
 
 export function inviteLink(email: string): string {
   const base = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`;
@@ -40,8 +40,9 @@ export const ClientInviteModal: React.FC<{
     if (!name.trim()) return setError('Enter a name.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Enter a valid email.');
     if (joined && cleanEmail !== savedEmail) return setError('An active account email cannot be changed here. Use a verified email-change process.');
-    if (clients.some((c) => c.id !== client.id && emailCooldownKey(c.email ?? '') === emailCooldownKey(cleanEmail))) {
-      return setError('This Gmail address already belongs to another client.');
+    const duplicate = findDuplicateClientByEmail(clients, cleanEmail, client.id);
+    if (duplicate) {
+      return setError(duplicateClientEmailMessage(cleanEmail, duplicate.email));
     }
     const [numStr, pName] = phaseValue.split('-');
     const nextPhaseNumber = (Number(numStr) || client.phaseNumber) as 1 | 2 | 3 | 4;

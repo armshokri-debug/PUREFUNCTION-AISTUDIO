@@ -142,6 +142,46 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       }
       return json(route, 200, { ok: true });
     }
+    if (path === '/functions/v1/delete-client') {
+      const uid = uidFrom(req);
+      const prof = profileOf(uid);
+      if (!uid) return json(route, 401, { error: 'Sign in again.' });
+      if (!prof || prof.role !== 'coach') return json(route, 403, { error: 'Only the coach can delete a client.' });
+      const b = JSON.parse(req.postData() || '{}');
+      const clientId = String(b.clientId || '').trim();
+      if (!clientId || b.confirm !== true) {
+        return json(route, 400, { error: 'Explicit coach confirmation is required before deleting a client.' });
+      }
+      const c = db.clients.find((row) => row.id === clientId);
+      if (!c || c.coach_id !== prof.id) {
+        return json(route, 403, { error: 'Only the owning coach may delete this client.' });
+      }
+      const isTest = Boolean(c.data && c.data.isTestClient);
+      const storedName = String((c.data && c.data.name) || '').trim();
+      if (!isTest) {
+        if (!storedName || String(b.confirmName || '').trim().toLowerCase() !== storedName.toLowerCase()) {
+          return json(route, 400, { error: 'Type the client’s full name to confirm permanent deletion.' });
+        }
+      }
+      const linked = db.profiles.filter((p) => p.client_id === clientId);
+      if (linked.some((p) => p.role !== 'client' || p.id === prof.id)) {
+        return json(route, 409, { error: 'Refused: this client record is linked to a coach account.' });
+      }
+      const linkedIds = new Set(linked.map((p) => p.id));
+      db.users = db.users.filter((u) => !linkedIds.has(u.id));
+      db.profiles = db.profiles.filter((p) => !linkedIds.has(p.id) && p.client_id !== clientId);
+      db.clients = db.clients.filter((row) => row.id !== clientId);
+      db.workouts = db.workouts.filter((row) => row.client_id !== clientId);
+      db.coach_messages = db.coach_messages.filter((row) => row.client_id !== clientId);
+      db.coach_notes_secure = db.coach_notes_secure.filter((row) => row.client_id !== clientId);
+      db.food_entries = db.food_entries.filter((row) => row.client_id !== clientId);
+      db.food_items = db.food_items.filter((row) => row.client_id !== clientId);
+      db.posture_public_reports = db.posture_public_reports.filter((row) => row.client_id !== clientId);
+      Object.keys(db.clientFiles).forEach((k) => {
+        if (k.startsWith(clientId + '/')) delete db.clientFiles[k];
+      });
+      return json(route, 200, { ok: true, deletedClientId: clientId, deletedAuthUsers: linkedIds.size, deletedFiles: 0 });
+    }
 
     // ---------------- Auth ----------------
     if (path === '/auth/v1/verify' && method === 'POST') {

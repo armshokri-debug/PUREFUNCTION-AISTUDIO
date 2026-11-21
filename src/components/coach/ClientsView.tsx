@@ -21,6 +21,7 @@ import { ClientActionMenu } from './ClientActionMenu';
 import { ClientDeleteModal } from './ClientDeleteModal';
 import { ClientProfile, ClientSection } from '../../types';
 import { ClientAvatar } from '../VisualAssets';
+import { duplicateClientEmailMessage, findDuplicateClientByEmail } from '../../lib/clients';
 
 interface ClientsViewProps {
   clients: ClientProfile[];
@@ -35,9 +36,10 @@ interface ClientsViewProps {
   }) => string | void;
   onUpdateClient?: (updated: ClientProfile) => void;
   onEnsureSaved?: () => Promise<boolean>;
-  onCreateTestClient: () => void;
-  onDeleteClient?: (id: string) => void;
-  onDeleteTestClient: (id: string) => void;
+  showTestClientButton?: boolean;
+  onCreateTestClient?: () => void;
+  onDeleteClient?: (id: string, confirmName: string) => Promise<string | null> | string | null | void;
+  onDeleteTestClient: (id: string) => Promise<string | null> | string | null | void;
   /** client ids that have an account (cloud only; undefined in demo mode) */
   joinedIds?: Set<string>;
 }
@@ -88,6 +90,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   onAddClient,
   onUpdateClient,
   onEnsureSaved,
+  showTestClientButton = false,
   onCreateTestClient,
   onDeleteClient,
   onDeleteTestClient,
@@ -155,8 +158,9 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       setFormError('Enter the email your client will sign in with.');
       return;
     }
-    if (clients.some((c) => (c.email ?? '').toLowerCase() === email)) {
-      setFormError('A client with this email already exists.');
+    const duplicate = findDuplicateClientByEmail(clients, email);
+    if (duplicate) {
+      setFormError(duplicateClientEmailMessage(email, duplicate.email));
       return;
     }
     setFormError(null);
@@ -209,15 +213,17 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     }
   };
 
-  const handleConfirmDelete = (clientId: string) => {
+  const handleConfirmDelete = async (clientId: string, confirmName: string): Promise<string | null> => {
     const target = clients.find((c) => c.id === clientId);
-    if (!target) return;
-    if (target.isTestClient) {
-      onDeleteTestClient(clientId);
-    } else if (onDeleteClient) {
-      onDeleteClient(clientId);
-    }
+    if (!target) return 'Client not found.';
+    const err = target.isTestClient
+      ? await onDeleteTestClient(clientId)
+      : onDeleteClient
+        ? await onDeleteClient(clientId, confirmName)
+        : 'Client deletion is not available.';
+    if (err) return err;
     setMobileDetailOpen(false);
+    return null;
   };
 
   // Real numbers across active clients
@@ -247,14 +253,16 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={clients.some((c) => c.isTestClient)}
-            onClick={onCreateTestClient}
-            className="min-h-[44px] px-3.5 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl font-medium text-sm text-[#374151] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
-          >
-            + Test Client
-          </button>
+          {showTestClientButton && onCreateTestClient && (
+            <button
+              type="button"
+              disabled={clients.some((c) => c.isTestClient)}
+              onClick={onCreateTestClient}
+              className="min-h-[44px] px-3.5 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl font-medium text-sm text-[#374151] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+            >
+              + Test Client
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setIsAddModalOpen(true)}

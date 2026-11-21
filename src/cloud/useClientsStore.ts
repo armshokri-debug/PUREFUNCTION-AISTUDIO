@@ -13,6 +13,8 @@ export type SyncState = 'saved' | 'saving' | 'error' | 'offline';
 export interface ClientsStore {
   clients: ClientProfile[];
   setClients: (update: (prev: ClientProfile[]) => ClientProfile[]) => void;
+  /** Removes a client already deleted on the server (or locally in demo mode) without issuing a redundant client-side DELETE. */
+  forgetClient: (id: string) => void;
   loaded: boolean;
   sync: SyncState;
   loadError: string | null;
@@ -35,7 +37,13 @@ function loadLocalClients(): ClientProfile[] {
 
 export function useLocalClientsStore(): ClientsStore {
   const [clients, setClients] = usePersistentState<ClientProfile[]>('pf.clients.v2', loadLocalClients);
-  return { clients, setClients, loaded: true, sync: 'saved', loadError: null, flush: async () => true };
+  const forgetClient = useCallback(
+    (id: string) => {
+      setClients((prev) => prev.filter((c) => c.id !== id));
+    },
+    [setClients]
+  );
+  return { clients, setClients, forgetClient, loaded: true, sync: 'saved', loadError: null, flush: async () => true };
 }
 
 /* ---------------------------------------------------------------------------
@@ -331,6 +339,19 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
     []
   );
 
+  const forgetClient = useCallback((id: string) => {
+    const removed = current.current.find((c) => c.id === id);
+    pushedClients.current.delete(id);
+    clientVersions.current.delete(id);
+    for (const w of removed?.workouts ?? []) {
+      pushedWorkouts.current.delete(w.id);
+      workoutVersions.current.delete(w.id);
+    }
+    const next = current.current.filter((c) => c.id !== id);
+    current.current = next;
+    setState(next);
+  }, []);
+
   // save before the tab closes, and warn if unsaved edits haven't synced yet
   useEffect(() => {
     const onHide = () => {
@@ -440,5 +461,5 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
     };
   }, [profile, loaded]);
 
-  return { clients, setClients, loaded, sync, loadError, flush };
+  return { clients, setClients, forgetClient, loaded, sync, loadError, flush };
 }
