@@ -250,6 +250,13 @@ describe('CLI dry-run, live-execution lock, and disabled-by-default workflow inv
     expect(liveJob).toContain('ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}');
     expect(liveJob).not.toContain("github.event_name == 'schedule' && 'true'");
     expect(liveJob).not.toContain("ENABLE_SUPABASE_BACKUP: ${{ github.event_name == 'schedule'");
+    // Ubuntu 24.04 may default to pg_dump 16 even after installing PostgreSQL 17.
+    // Require the PG17 bin directory ahead of system binaries and assert it before any live dump.
+    const beforeLiveDump = liveJob.slice(0, liveJob.indexOf('      - name: Execute read-only encrypted backup'));
+    expect(beforeLiveDump).toContain('PG17_BIN="/usr/lib/postgresql/17/bin"');
+    expect(beforeLiveDump).toContain('echo "$PG17_BIN" >> "$GITHUB_PATH"');
+    expect(beforeLiveDump).toContain("pg_dump --version | grep -E '^pg_dump");
+    expect(beforeLiveDump).toContain("psql --version | grep -E '^psql");
     // Manual live execution must still require explicit approval; no runner artifacts.
 
     // Must never upload encrypted/unencrypted DB backups as GitHub Actions artifacts
