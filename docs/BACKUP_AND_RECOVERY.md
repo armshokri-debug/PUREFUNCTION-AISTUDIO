@@ -2,10 +2,18 @@
 
 **Target production Supabase project:** `rugwzvztweiffprkxfdc` (Free plan — no scheduled Supabase backups or PITR)  
 **Active repository:** `armshokri-debug/PUREFUNCTION-AISTUDIO`  
-**Status:** **PREPARED ONLY — NOT YET ACTIVATED OR LIVE-VERIFIED.**  
-Backup coverage must **not** be considered complete until external storage and secrets are configured with owner approval, a real backup runs successfully, and an isolated restore drill succeeds on a separate Supabase project.
+**Status (2026-11-21):** **ONE LIVE ENCRYPTED BACKUP VERIFIED; EPHEMERAL POSTGRESQL RESTORE PASSED; DAILY AUTOMATION NOT ENABLED.**  
+The 2026-11-19 encrypted Google Drive archive and its manifest were verified. GitHub Actions successfully decrypted the archive and restored the database into an ephemeral isolated PostgreSQL instance on 2026-11-21. This is not a full Supabase service-level recovery drill. The repository variable `ENABLE_SUPABASE_BACKUP` is currently `false`, so the daily backup job skips execution. Do not claim continuous backup coverage until the owner enables the gate, an approved new backup is verified, and scheduled runs are confirmed.
 
 ---
+
+## Verified evidence (as of 2026-11-21)
+
+- **Live read-only encrypted backup created, 2026-11-19:** [GitHub Actions run 44571268249](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44571268249). The private Google Drive folder contains the 209,258-byte encrypted archive and a separate integrity manifest. No user data appears in GitHub artifacts.
+- **Drive download, decryption, checksum and inventory verified:** [Run 44573705661](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44573705661).
+- **Database restore to an ephemeral isolated PostgreSQL instance passed, 2026-11-21:** [Run 44885726470](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44885726470). Full live Supabase Auth/Storage service recovery is **not** covered by this test.
+- **Fail-closed daily schedule/approval fix merged:** [PR #15](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/pull/15). The job cannot start when `ENABLE_SUPABASE_BACKUP` is unset or false, including on schedule.
+- **Remaining release gates:** owner enables the repository variable when approved, new scheduled/backup runs observed, encrypted archive/manifests independently verified, and a complete Supabase service-level recovery drill planned.
 
 ## 1. Current Backup Coverage vs. Gaps
 
@@ -222,4 +230,4 @@ pg_restore --dbname="$RECOVERY_DB_URL" --data-only --disable-triggers --no-owner
 2. Set GitHub Repository Variable `ENABLE_SUPABASE_BACKUP` to `true`.
 3. Run one manual `live-backup` (entering `RUN_BACKUP`) and verify both the encrypted `.tar.gz.enc` archive and `.manifest.json` appear in your Google Drive `PureFunction-Encrypted-Backups` folder (or external S3/R2 bucket).
 4. Download that encrypted archive and run `verify-and-decrypt.cjs` locally (and perform an isolated restore drill on a separate test Supabase project).
-5. Only then uncomment the `schedule:` block in `.github/workflows/supabase-backup.yml` so daily backups run automatically.
+5. The `schedule:` block is **already enabled** in `.github/workflows/supabase-backup.yml` (`03:17 UTC`), but actual scheduled backup execution is protected by the `ENABLE_SUPABASE_BACKUP=true` repository-variable kill-switch. After the owner deliberately enables that variable, verify the first scheduled run and its new encrypted archive/manifest in the private Drive folder. Do not bypass the kill-switch.
