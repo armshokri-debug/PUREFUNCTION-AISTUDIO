@@ -165,6 +165,18 @@ jobs:
                 echo "BLOCKED: $name, missing extension control"
               else
                 echo "BLOCKED: $name, unexpected isolated restore error"
+                python3 - "$RUNNER_TEMP/restore-error.txt" <<'PY'
+                import re,sys
+                data=open(sys.argv[1],errors='replace').read()
+                m=re.search(r'ERROR:\\s*([^\\n]+)',data)
+                if m:
+                    line=m.group(1)
+                    line=re.sub(r'"[^"]*"|\x27[^\x27]*\x27|https?://\\S+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+','[redacted]',line)
+                    line=re.sub(r'\\b[0-9a-z]{12,}\\b','[redacted]',line,flags=re.I)
+                    print('Safe PostgreSQL error category: '+line[:110])
+                else:
+                    print('Safe PostgreSQL error category: restore utility failed before SQL execution')
+                PY
               fi
               exit 1
             fi
