@@ -116,7 +116,7 @@ export async function handleSendInvite(req: Request, deps: SendInviteDeps): Prom
 
   if (!sent.ok) {
     // Roll back ONLY an account created by this invocation, never an existing user.
-    if (!existing.data && 'userId' in generated && generated.userId) {
+    if (!existing.data && 'userId' in generated && typeof generated.userId === 'string') {
       try { await deps.deleteNewUser(generated.userId); } catch {
         console.warn(JSON.stringify({ event: 'invite_cleanup_failed' }));
       }
