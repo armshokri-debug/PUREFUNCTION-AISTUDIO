@@ -37,7 +37,7 @@ jobs:
       BACKUP_GDRIVE_REFRESH_TOKEN: ${{ secrets.BACKUP_GDRIVE_REFRESH_TOKEN }}
       BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
       BACKUP_GDRIVE_FOLDER_NAME: PureFunction-Encrypted-Backups
-      LOCAL_RESTORE_DB_URL: postgresql://postgres:local-restore-only@127.0.0.1:5432/restorecheck?sslmode=disable
+      LOCAL_RESTORE_DB_URL: postgresql://supabase_admin:local-restore-only@127.0.0.1:5432/restorecheck?sslmode=disable
     steps:
       - name: Checkout trusted code
         uses: actions/checkout@v4
@@ -121,7 +121,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$LOCAL_RESTORE_DB_URL" != postgresql://postgres:*@127.0.0.1:5432/restorecheck\?sslmode=disable ]]; then
+          if [[ "$LOCAL_RESTORE_DB_URL" != postgresql://supabase_admin:*@127.0.0.1:5432/restorecheck\?sslmode=disable ]]; then
             echo 'BLOCKED: Non-local database target'; exit 1
           fi
           psql "$LOCAL_RESTORE_DB_URL" -X -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
