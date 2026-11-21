@@ -3,6 +3,8 @@ import { Search, Plus, X, ArrowUpRight, ClipboardCheck, Dumbbell, LineChart, Fil
 import { ClientInviteModal } from './ClientInviteModal';
 import { ClientProfile, ClientSection } from '../../types';
 import { ClientAvatar } from '../VisualAssets';
+import { sendInviteEmail } from '../../cloud/email';
+import { emailCooldownKey } from '../../../supabase/functions/_shared/google-email-alias';
 
 interface ClientsViewProps {
   clients: ClientProfile[];
@@ -41,38 +43,65 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [newEmail, setNewEmail] = useState('');
   const [newPhase, setNewPhase] = useState<string>('1-Reposition');
   const [formError, setFormError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [inviteFailure, setInviteFailure] = useState<string | null>(null);
 
   const filteredClients = clients.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.phaseName.toLowerCase().includes(searchQuery.toLowerCase())
+      c.phaseName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreateClient = (e: React.FormEvent) => {
+  const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (creating) return;
+    if (!newName.trim()) return setFormError('Enter the client name.');
     const email = newEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setFormError('Enter the email your client will sign in with.');
       return;
     }
-    if (clients.some((c) => (c.email ?? '').toLowerCase() === email)) {
-      setFormError('A client with this email already exists.');
+    if (clients.some((c) => emailCooldownKey(c.email ?? '') === emailCooldownKey(email))) {
+      setFormError('This email already belongs to a client (including Gmail/Googlemail aliases).');
       return;
     }
     setFormError(null);
+    setInviteNotice(null);
+    setInviteFailure(null);
+    setCreating(true);
     const [numStr, pName] = newPhase.split('-');
-    const newId = onAddClient({
-      name: newName.trim(),
-      email,
-      phaseNumber: Number(numStr) as 1 | 2 | 3 | 4,
-      phaseName: pName as ClientProfile['phaseName']
-    });
-    setNewName('');
-    setNewEmail('');
-    setIsAddModalOpen(false);
-    // Cloud: right after adding, show the invite to send (like TrueCoach)
-    if (newId && joinedIds) setInviteFor(newId);
+    try {
+      const newId = onAddClient({
+        name: newName.trim(), email,
+        phaseNumber: Number(numStr) as 1 | 2 | 3 | 4,
+        phaseName: pName as ClientProfile['phaseName']
+      });
+      if (!newId) return setFormError('Could not add the client.');
+      if (onEnsureSaved) {
+        const saved = await onEnsureSaved();
+        if (!saved) {
+          setInviteFor(newId);
+          setInviteFailure('Client sync failed. Retry the invite after saving.');
+        } else {
+          const err = await sendInviteEmail(newId);
+          if (err) {
+            setInviteFor(newId);
+            setInviteFailure(err);
+          } else {
+            setInviteNotice('Invitation email accepted for ' + email + '.');
+          }
+        }
+      } else if (joinedIds) {
+        setInviteFor(newId);
+      }
+      setNewName('');
+      setNewEmail('');
+      setIsAddModalOpen(false);
+    } finally {
+      setCreating(false);
+    }
   };
 
   // Real numbers: clients, assessments due within 5 days, workouts completed this week
@@ -122,6 +151,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       {/* Subtle Divider Line matching Mockup 6 */}
       <div className="border-t border-gray-200/80 mb-5" />
 
+      {inviteNotice && <p role="status" className="mb-3 text-sm text-[#166534]">{inviteNotice}</p>}
+      {inviteFailure && <p role="alert" className="mb-3 text-sm text-red-700">Invitation not sent: {inviteFailure}</p>}
       {/* Search & Add Client Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div className="relative w-full sm:w-80">
@@ -303,7 +334,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           joined={joinedIds ? joinedIds.has(inviteClient.id) : null}
           onSave={onUpdateClient}
           onEnsureSaved={onEnsureSaved}
-          onClose={() => setInviteFor(null)}
+          onClose={() => { setInviteFor(null); setInviteFailure(null); }}
         />
       )}
 
@@ -314,14 +345,14 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-[#111827]">Add New Client</h2>
               <button
-                onClick={() => setIsAddModalOpen(false)}
+                onClick={() => { if (!creating) setIsAddModalOpen(false); }}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-[#111827] hover:bg-gray-100 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateClient} className="space-y-4">
+            <form onSubmit={(e) => void handleCreateClient(e)} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">
                   Full Name
@@ -389,16 +420,17 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => { if (!creating) setIsAddModalOpen(false); }}
                   className="px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-[#111827] cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
+                  disabled={creating}
                   className="bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-medium px-5 py-2.5 rounded-xl transition-colors cursor-pointer"
                 >
-                  Add client
+                  {creating ? 'Saving & inviting…' : onEnsureSaved ? 'Add & send invite' : 'Add client'}
                 </button>
               </div>
             </form>
