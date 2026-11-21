@@ -183,7 +183,7 @@ export const AuthScreen: React.FC = () => {
         )}
 
         {sent && mode === 'sign-up' && <p role="status" className="text-sm text-green-800 break-words">If this email is invited, a verification link is on its way. Check your inbox and spam, then open the link before signing in.</p>}
-        {(mode === 'sign-in' || (mode === 'sign-up' && (!!notice || sent))) && <button type="button" disabled={busy || !email.trim()} onClick={async () => { setBusy(true); const err = await resendVerification(email); setBusy(false); setError(err); if (!err) setSent(true); }} className="text-sm underline min-h-[44px]">Resend verification email</button>}
+        {((mode === 'sign-in' && /not confirmed|verification/i.test(error ?? '')) || (mode === 'sign-up' && (!!notice || sent))) && <button type="button" disabled={busy || !email.trim()} onClick={async () => { setBusy(true); const err = await resendVerification(email); setBusy(false); setError(err); if (!err) setSent(true); }} className="text-sm underline min-h-[44px]">Resend verification email</button>}
         {sent && mode === 'sign-in' && <p role="status" className="text-sm text-green-800">If verification is needed, a link is on its way. Check your inbox and spam.</p>}
         {sent && mode === 'forgot' && (
           <div className="flex items-start gap-2 text-sm text-[#166534] bg-green-50 border border-green-100 rounded-xl px-3 py-2.5" role="status">
