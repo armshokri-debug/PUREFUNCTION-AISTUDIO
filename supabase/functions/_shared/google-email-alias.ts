@@ -21,3 +21,21 @@ export function emailCooldownKey(rawEmail: string): string {
     ? email.slice(0, -'googlemail.com'.length) + 'gmail.com'
     : email;
 }
+
+/**
+ * Retry only an invalid-password-style sign-in against Google's other domain.
+ * A valid exact-address login always wins. Non-Google addresses are untouched.
+ * The same password must be supplied by the caller for both attempts.
+ */
+export async function signInWithGoogleEmailFallback<T extends { error: { message: string } | null }>(
+  rawEmail: string,
+  attempt: (email: string) => Promise<T>
+): Promise<T> {
+  const email = rawEmail.trim();
+  const first = await attempt(email);
+  const alternate = alternateGoogleMailDomain(email);
+  if (!alternate || !first.error || !/invalid login credentials/i.test(first.error.message)) {
+    return first;
+  }
+  return attempt(alternate);
+}
