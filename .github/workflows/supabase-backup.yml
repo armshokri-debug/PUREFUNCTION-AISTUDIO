@@ -154,8 +154,8 @@ jobs:
       - name: Verify PostgreSQL 17 client selection before live backup
         run: |
           set -euo pipefail
-          pg_dump --version | grep -E '^pg_dump \\(PostgreSQL\\) 17\\.'
-          psql --version | grep -E '^psql \\(PostgreSQL\\) 17\\.'
+          pg_dump --version | grep -F 'pg_dump (PostgreSQL) 17.'
+          psql --version | grep -F 'psql (PostgreSQL) 17.'
 
       - name: Execute read-only encrypted backup to configured external storage (S3 or Google Drive)
         id: backup
