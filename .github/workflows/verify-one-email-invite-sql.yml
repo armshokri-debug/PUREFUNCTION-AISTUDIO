@@ -1,0 +1,122 @@
+name: Verify Secure One-Email Invitation SQL (PR13)
+
+on:
+  push:
+    branches:
+      - fix/streamlined-secure-client-invite
+    paths:
+      - .github/workflows/verify-one-email-invite-sql.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-postgresql17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: test_only
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap isolated Auth and profile schema; run onboarding migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          CREATE ROLE service_role NOLOGIN;
+          CREATE SCHEMA auth;
+          CREATE SCHEMA private;
+          CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
+            $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+          CREATE TABLE auth.users (id uuid PRIMARY KEY, email text NOT NULL, email_confirmed_at timestamptz, encrypted_password text);
+          CREATE TABLE public.profiles (id uuid PRIMARY KEY, role text NOT NULL, client_id text);
+          CREATE TABLE public.clients (id text PRIMARY KEY, coach_id uuid NOT NULL);
+          CREATE FUNCTION private.basic_is_coach() RETURNS boolean LANGUAGE sql STABLE AS
+            $coach_gate$ SELECT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'coach') $coach_gate$;
+          \i supabase/migrations/20261121123000_pf_one_email_invite.sql
+          DO $$ BEGIN
+            IF has_function_privilege('anon','public.pf_invite_existing_account(text)','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous must not enumerate accounts';
+            END IF;
+            IF has_function_privilege('authenticated','public.pf_invite_existing_account(text)','EXECUTE') THEN
+              RAISE EXCEPTION 'Authenticated users must not enumerate Auth accounts';
+            END IF;
+            IF NOT has_function_privilege('service_role','public.pf_invite_existing_account(text)','EXECUTE') THEN
+              RAISE EXCEPTION 'Service-role lookup is missing';
+            END IF;
+            IF has_function_privilege('anon','public.pf_joined_client_ids()','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous must not list joined clients';
+            END IF;
+            IF has_function_privilege('anon','public.pf_my_password_ready()','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous must not query password readiness';
+            END IF;
+          END $$;
+          INSERT INTO auth.users VALUES
+            ('00000000-0000-0000-0000-000000000001','pending@example.com',NULL,NULL),
+            ('00000000-0000-0000-0000-000000000002','accepted@example.com',now(),'hashed-password'),
+            ('00000000-0000-0000-0000-000000000003','clicked@example.com',now(),NULL);
+          INSERT INTO public.profiles VALUES
+            ('00000000-0000-0000-0000-000000000011','coach',NULL),
+            ('00000000-0000-0000-0000-000000000012','coach',NULL),
+            ('00000000-0000-0000-0000-000000000001','client','pending'),
+            ('00000000-0000-0000-0000-000000000002','client','accepted'),
+            ('00000000-0000-0000-0000-000000000003','client','clicked');
+          INSERT INTO public.clients VALUES
+            ('pending','00000000-0000-0000-0000-000000000011'),
+            ('accepted','00000000-0000-0000-0000-000000000011'),
+            ('clicked','00000000-0000-0000-0000-000000000011');
+          DO $$ BEGIN
+            IF (SELECT public.pf_invite_existing_account('accepted@example.com')->>'clientId') IS DISTINCT FROM 'accepted' THEN
+              RAISE EXCEPTION 'Auth account must resolve its server-owned client profile';
+            END IF;
+            IF (SELECT (public.pf_invite_existing_account('accepted@example.com')->>'hasPassword')::boolean) IS DISTINCT FROM true THEN
+              RAISE EXCEPTION 'Existing account lookup failed';
+            END IF;
+            IF (SELECT (public.pf_invite_existing_account('clicked@example.com')->>'hasPassword')::boolean) IS DISTINCT FROM false THEN
+              RAISE EXCEPTION 'Clicked invite must not be active';
+            END IF;
+          END $$;
+          SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000011',false);
+          DO $$ BEGIN
+            IF (SELECT count(*) FROM public.pf_joined_client_ids()) != 1 THEN
+              RAISE EXCEPTION 'Only accepted client with password must appear joined';
+            END IF;
+          END $$;
+          SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',false);
+          DO $check_gate$ BEGIN
+            IF public.pf_my_password_ready() IS DISTINCT FROM true THEN
+              RAISE EXCEPTION 'Confirmed user with password must be ready';
+            END IF;
+          END $check_gate$;
+          SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000003',false);
+          DO $check_gate$ BEGIN
+            IF public.pf_my_password_ready() IS DISTINCT FROM false THEN
+              RAISE EXCEPTION 'Confirmed invite with no password must remain gated';
+            END IF;
+          END $check_gate$;
+          SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000012',false);
+          DO $$ BEGIN
+            IF (SELECT count(*) FROM public.pf_joined_client_ids()) != 0 THEN
+              RAISE EXCEPTION 'Other coaches must not see clients';
+            END IF;
+          END $$;
+          SQL
+          echo 'PASS PostgreSQL 17 migration, access grants, joined logic and coach scoping'

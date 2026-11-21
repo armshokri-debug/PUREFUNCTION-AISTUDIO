@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import type { Session } from '@supabase/supabase-js';
 import { isCloud, supabase, supabaseUrl } from './supabase';
 import { clearPendingRecovery, hasPendingRecovery, markPendingRecovery } from './recoveryGate';
+import { clearPendingInvite, hasPendingInvite, markPendingInvite } from './inviteGate';
 import { signInWithGoogleEmailFallback } from '../../supabase/functions/_shared/google-email-alias';
 
 export interface Profile {
@@ -17,6 +18,7 @@ export type SessionStatus =
   | 'loading'
   | 'signed-out'
   | 'no-access' // signed in, but not the coach and not on a client list
+  | 'invite' // verified one-time invite: choose password before mounting the workspace
   | 'reset' // opened a password-reset link: choose a new password
   | 'reset-complete' // updateUser succeeded; user must sign in again
   | 'ready';
@@ -33,6 +35,8 @@ interface SessionValue {
   notice: string | null;
   /** Emails a reset link. Returns an error message or null. */
   forgotPassword: (email: string) => Promise<string | null>;
+  /** One-email invitation: save password after verifying the invite and enter the client workspace. */
+  acceptInvitation: (password: string) => Promise<string | null>;
   /** Saves a password only inside verified recovery; requires a fresh login afterwards. */
   setNewPassword: (password: string) => Promise<string | null>;
   /** Leaves the recovery success screen for a fresh password-based sign-in. */
@@ -58,6 +62,7 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const resetPending = React.useRef(hasPendingRecovery() || new URLSearchParams(window.location.search).has('reset'));
   const resetCompleted = React.useRef(false);
+  const invitePending = React.useRef(hasPendingInvite() || new URLSearchParams(window.location.search).has('invite'));
 
   const profileRequest = React.useRef(0);
   const loginPending = React.useRef(false);
@@ -73,6 +78,17 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       else {
         resetPending.current = false;
         clearPendingRecovery();
+        setStatus('signed-out');
+      }
+      return null;
+    }
+    if (invitePending.current) {
+      setSession(s);
+      setProfile(null);
+      if (s) setStatus('invite');
+      else {
+        invitePending.current = false;
+        clearPendingInvite();
         setStatus('signed-out');
       }
       return null;
@@ -104,6 +120,25 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? 'This is a client account. Choose “I’m a client” to sign in.'
         : 'This is a coach account. Choose “I’m the coach” to sign in.';
     }
+    if (data.role === 'client') {
+      // Invite OTP creates a valid Supabase session before password selection.
+      // Do not let another tab load workouts until activation is complete.
+      const { data: ready, error: gateError } = await supabase.rpc('pf_my_password_ready');
+      if (request !== profileRequest.current || resetPending.current || invitePending.current || resetCompleted.current) return null;
+      if (gateError) {
+        setProfile(null);
+        setStatus('no-access');
+        return 'Could not check account activation. Please try again.';
+      }
+      if (ready !== true) {
+        invitePending.current = true;
+        markPendingInvite();
+        setSession(s);
+        setProfile(null);
+        setStatus('invite');
+        return null;
+      }
+    }
     const next: Profile = {
       id: data.id,
       role: data.role,
@@ -133,8 +168,36 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let active = true;
     const params = new URLSearchParams(window.location.search);
     const resetToken = params.get('reset');
+    const inviteToken = params.get('invite');
+    const inviteType = params.get('inviteType') === 'magiclink' ? 'magiclink' : 'invite';
     const verifyToken = params.get('verify');
     const start = async () => {
+      if (inviteToken) {
+        // A newly opened invitation supersedes stale recovery UI state in this tab.
+        resetPending.current = false;
+        clearPendingRecovery();
+        invitePending.current = true;
+        markPendingInvite();
+        ++profileRequest.current;
+        setProfile(null);
+        setStatus('loading');
+        const url = new URL(window.location.href);
+        url.searchParams.delete('invite');
+        url.searchParams.delete('inviteType');
+        window.history.replaceState(null, '', url.toString());
+        const { data, error } = await supabase!.auth.verifyOtp({ type: inviteType, token_hash: inviteToken });
+        if (!active) return;
+        if (!error && data.session) {
+          setSession(data.session);
+          setStatus('invite');
+          return;
+        }
+        invitePending.current = false;
+        clearPendingInvite();
+        setNotice('This invitation has expired or was already used. Ask your coach to resend it.');
+        // A failed invitation must not reveal a different cached account.
+        await supabase!.auth.signOut({ scope: 'local' });
+      }
       if (verifyToken) {
         const url = new URL(window.location.href);
         url.searchParams.delete('verify');
@@ -170,6 +233,19 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       const { data } = await supabase!.auth.getSession();
       if (!active) return;
+      if (invitePending.current) {
+        if (data.session) {
+          setSession(data.session);
+          setProfile(null);
+          setStatus('invite');
+        } else {
+          invitePending.current = false;
+          clearPendingInvite();
+          setNotice('Your invitation session expired. Ask your coach to resend the link.');
+          setStatus('signed-out');
+        }
+        return;
+      }
       if (resetPending.current) {
         if (data.session) {
           setSession(data.session);
@@ -199,6 +275,8 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         resetPending.current = false;
         clearPendingRecovery();
+        invitePending.current = false;
+        clearPendingInvite();
         setStatus('signed-out');
         return;
       }
@@ -213,6 +291,12 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       if (resetCompleted.current) return;
       setSession(s);
+      if (invitePending.current) {
+        ++profileRequest.current;
+        setProfile(null);
+        if (s) setStatus('invite');
+        return;
+      }
       if (resetPending.current) {
         ++profileRequest.current;
         setProfile(null);
@@ -222,7 +306,7 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
         // Supabase warns against awaiting API calls inside this callback.
         window.setTimeout(() => {
-          if (active && !loginPending.current && !resetPending.current && !resetCompleted.current) {
+          if (active && !loginPending.current && !invitePending.current && !resetPending.current && !resetCompleted.current) {
             void loadProfile(s);
           }
         }, 0);
@@ -248,6 +332,8 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
       resetPending.current = false;
       resetCompleted.current = false;
       clearPendingRecovery();
+      invitePending.current = false;
+      clearPendingInvite();
       setNotice(null);
       return await loadProfile(data.session, portal);
     } catch { return 'No connection. Check your internet and try again.'; }
@@ -310,6 +396,27 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
+  const acceptInvitation = async (password: string): Promise<string | null> => {
+    if (!supabase) return 'Cloud is not configured.';
+    if (!invitePending.current) return 'Open a valid invitation email first.';
+    if (password.length < 8 || password.length > 72) return 'Password must be 8 to 72 characters.';
+    try {
+      const before = await supabase.auth.getSession();
+      if (!before.data.session) return 'Invitation session expired. Ask your coach to resend it.';
+      const { data, error } = await supabase.auth.updateUser({ password });
+      if (error) return friendlyAuthError(error.message);
+      if (!data.user) return 'Password was not confirmed. Try again.';
+      const after = await supabase.auth.getSession();
+      if (!after.data.session) return 'Password saved. Sign in with your new password.';
+      invitePending.current = false;
+      clearPendingInvite();
+      setNotice(null);
+      return await loadProfile(after.data.session, 'client');
+    } catch {
+      return 'Could not complete your invitation. Check your connection and try again.';
+    }
+  };
+
   const setNewPassword = async (password: string) => {
     if (!supabase) return 'Cloud is not configured.';
     if (!resetPending.current) return 'Open a fresh recovery link before changing your password.';
@@ -342,6 +449,8 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     resetPending.current = false;
     resetCompleted.current = false;
     clearPendingRecovery();
+    invitePending.current = false;
+    clearPendingInvite();
     ++profileRequest.current;
     setSession(null);
     setProfile(null);
@@ -361,6 +470,7 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         resendVerification,
         notice,
         forgotPassword,
+        acceptInvitation,
         setNewPassword,
         finishRecovery: () => {
           resetCompleted.current = false;

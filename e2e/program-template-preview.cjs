@@ -475,7 +475,7 @@ async function measureOverflow(page) {
     .filter(
       (entry) =>
         /^(POST|PATCH|PUT|DELETE)\s+\/rest\/v1\//.test(entry) &&
-        !/^POST\s+\/rest\/v1\/rpc\/(pf_head_coach|pf_list_trainers)\b/.test(entry)
+        !/^POST\s+\/rest\/v1\/rpc\/(pf_head_coach|pf_list_trainers|pf_joined_client_ids)\b/.test(entry)
     );
   const retryClickWriteLogs = mock.log
     .slice(retryClickLogStart)
