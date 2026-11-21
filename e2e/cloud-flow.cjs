@@ -75,36 +75,24 @@ const today = iso(new Date());
   ok(mock.db.profiles.some((p) => p.role === 'coach'), 'coach profile created for the coach email');
   await shot(C, 'cloud-coach-empty');
 
-  // add a client
+  // Single coach action: add the client, persist it, and send an email invitation.
   await C.getByRole('button', { name: 'Add client' }).click();
-  // Regression: starting phase guidance follows the coach's chosen phase.
   const startingPhase = C.locator('select').filter({ has: C.locator('option[value="1-Reposition"]') });
   await startingPhase.selectOption('2-Integrate');
   ok(await C.getByText(/Integrate: use coordinated, functional movement/).isVisible(), 'phase 2 shows Integrate guidance during onboarding');
   await startingPhase.selectOption('1-Reposition');
   ok(await C.getByText(/Reposition: start with breathing, positioning/).isVisible(), 'phase 1 shows Reposition guidance during onboarding');
   await C.getByPlaceholder('e.g., Jordan Taylor').fill('Ryan Lee');
-  await C.getByPlaceholder('jordan.taylor@example.com').fill('ryan.typo@example.com');
-  await C.locator('form button[type=submit]').click();
-  await C.waitForTimeout(800);
-  ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'after adding a client the invite sheet opens (no jump to Assessment)');
-  await C.getByRole('button', { name: 'Cancel' }).click();
-  await C.waitForTimeout(800);
-  await C.getByRole('button', { name: /Not joined · Invite/ }).click();
-  ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'coach sees the client has not joined');
-  const emailBox = C.locator('input[type=email]');
-  await emailBox.fill('Ryan@Example.com');
-  await C.getByRole('button', { name: 'Save', exact: true }).click();
-  await C.waitForTimeout(1500);
+  await C.getByPlaceholder('jordan.taylor@example.com').fill('ryan@example.com');
+  await C.getByRole('button', { name: 'Add & send invite' }).click();
+  await C.getByRole('status').getByText('Invitation email accepted for ryan@example.com.').waitFor({ timeout: 10000 });
   const ryanRow = mock.db.clients.find((c) => c.email === 'ryan@example.com');
-  ok(!!ryanRow, 'coach corrected the email; saved lower-cased');
+  ok(!!ryanRow, 'coach saves client before sending the invitation');
   ok(ryanRow && ryanRow.data && ryanRow.data.inBody.weight === 0, 'new client has empty assessment data (no sample numbers)');
-
-  // email the invite + turn reminders off
+  const ryanInvite = mock.db.emails.find(e => e.kind === 'invite' && e.to === 'ryan@example.com');
+  ok(!!ryanInvite && !!ryanInvite.token, 'one-click invite issued a one-time proof-of-email token');
   await C.getByRole('button', { name: /Not joined · Invite/ }).click();
-  await C.getByRole('button', { name: 'Email the invite' }).click();
-  await C.getByText('Invite sent to ryan@example.com').waitFor({ timeout: 5000 }).catch(() => {});
-  ok(mock.db.emails.some((e) => e.kind === 'invite' && e.to === 'ryan@example.com'), 'coach emails the invite in one tap');
+  ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'pending invitation is not shown as an active account');
   await C.getByLabel('Morning email on workout days').uncheck();
   await C.getByRole('button', { name: 'Save', exact: true }).click();
   await C.waitForTimeout(1200);
@@ -182,16 +170,14 @@ const today = iso(new Date());
 
   /* ---------------- client ---------------- */
   const R = await open({ width: 375, height: 812 });
-  await R.goto(`http://localhost:${PORT}/?join=ryan%40example.com`);
-  await R.getByRole('heading', { name: 'Set up your account' }).waitFor();
-  ok((await R.getByLabel('Email').inputValue()) === 'ryan@example.com', 'invite link opens client set-up with the email filled in');
-  await R.getByLabel('Your name').fill('Ryan');
-  await R.getByLabel('Password').fill('ryanpass1');
-  await R.locator('form button[type=submit]').click();
-  await R.waitForTimeout(300);
-  await verify(R, 'ryan@example.com');
+  await R.goto(`http://localhost:${PORT}/?invite=${ryanInvite.token}&inviteType=invite`);
+  await R.getByRole('heading', { name: 'Welcome to Pure Function' }).waitFor();
+  ok(await R.getByRole('textbox', { name: 'Email' }).count() === 0, 'invited client never re-enters their email');
+  await R.getByLabel('Create password').fill('ryanpass1');
+  await R.getByLabel('Confirm password').fill('ryanpass1');
+  await R.getByRole('button', { name: 'Activate account' }).click();
   await R.getByRole('heading', { name: /Goblet Squat/ }).first().waitFor({ timeout: 10000 });
-  ok(true, 'client signs up with the email the coach added and sees today’s workout');
+  ok(true, 'client accepts one emailed link, sets password and immediately sees workouts');
   ok((await R.getByRole('button', { name: 'Coach' }).count()) === 0, 'client has no coach switch');
   ok((await R.getByText(/Workouts this week/).count()) === 0, 'client cannot see the coach screens');
   await shot(R, 'cloud-client-today');
@@ -203,7 +189,7 @@ const today = iso(new Date());
   await R.getByText(/120 kcal/).waitFor();
   ok(mock.db.food_entries.length === 1 && mock.db.food_items[0].protein === 15, 'client food diary uses normalized secure RPC');
 
-  ok(!(await R.evaluate(() => location.search.includes('join='))), 'invite parameter removed after sign-in');
+  ok(!(await R.evaluate(() => location.search.includes('invite='))), 'one-time invite token removed from URL');
   // live: coach adds an exercise -> appears on client without reload
   await C.getByPlaceholder(/Search name or muscle/).fill('romanian deadlift');
   await C.waitForTimeout(300);
@@ -473,10 +459,8 @@ const today = iso(new Date());
   await C.getByRole('button', { name: 'Add client' }).click();
   await C.getByPlaceholder('e.g., Jordan Taylor').fill('Casey Pri');
   await C.getByPlaceholder('jordan.taylor@example.com').fill('casey.pri@example.invalid');
-  await C.locator('form button[type=submit]').click();
-  await C.waitForTimeout(800);
-  await C.getByRole('button', { name: 'Cancel' }).click();
-  await C.waitForTimeout(800);
+  await C.getByRole('button', { name: 'Add & send invite' }).click();
+  await C.getByRole('status').getByText(/Invitation email accepted for casey.pri@example.invalid/).waitFor({ timeout: 10000 });
   const caseyRow = mock.db.clients.find((c) => c.email === 'casey.pri@example.invalid');
   ok(!!caseyRow, 'pri: created second synthetic client for isolation check');
 
