@@ -149,7 +149,7 @@ jobs:
             if [[ "$section" == "pre-data" ]]; then
               flags+=(--clean --if-exists)
             fi
-            if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" "\${flags[@]}" "$archive" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
+            if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" "${flags[@]}" "$archive" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
               echo "PASS: $name $section restored into isolated PostgreSQL 17"
               return 0
             fi
