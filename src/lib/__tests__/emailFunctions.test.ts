@@ -156,7 +156,7 @@ describe('Route 1: send-invite (client invitation)', () => {
       ),
       isClientAccountConfirmed: vi.fn(async () => false),
       getExistingAccount: vi.fn(async (_email: string) => ({
-        data: null as { email: string; confirmed: boolean } | null, error: null
+        data: null as { email: string; confirmed: boolean; hasPassword: boolean } | null, error: null
       })),
       generateInviteLink: vi.fn(async (_email: string, _name: string) => ({
         hashedToken: 'invite-hash', userId: 'fresh-invite-uid', error: null
@@ -249,7 +249,7 @@ describe('Route 1: send-invite (client invitation)', () => {
   it('resends to an unconfirmed account using magiclink and never creates or deletes another user', async () => {
     const deps = baseDeps();
     deps.getExistingAccount.mockResolvedValueOnce({
-      data: { email: 'athlete@example.invalid', confirmed: false }, error: null
+      data: { email: 'athlete@example.invalid', confirmed: false, hasPassword: false }, error: null
     });
     const response = await handleSendInvite(
       postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
@@ -265,7 +265,7 @@ describe('Route 1: send-invite (client invitation)', () => {
   it('blocks an existing confirmed account without sending another invitation or changing credentials', async () => {
     const deps = baseDeps();
     deps.getExistingAccount.mockResolvedValueOnce({
-      data: { email: 'athlete@example.invalid', confirmed: true }, error: null
+      data: { email: 'athlete@example.invalid', confirmed: true, hasPassword: true }, error: null
     });
     const response = await handleSendInvite(
       postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
