@@ -3,6 +3,7 @@ import { Check, Copy, X, AlertCircle, Mail, Loader2 } from 'lucide-react';
 import { ClientProfile } from '../../types';
 import { isCloud } from '../../cloud/supabase';
 import { sendInviteEmail } from '../../cloud/email';
+import { emailCooldownKey } from '../../../supabase/functions/_shared/google-email-alias';
 
 export function inviteLink(email: string): string {
   const base = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`;
@@ -24,6 +25,7 @@ export const ClientInviteModal: React.FC<{
   const [copied, setCopied] = useState<'link' | 'message' | null>(null);
   const [mailing, setMailing] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [reminders, setReminders] = useState(client.emailReminders !== false);
+  const [showDetails, setShowDetails] = useState(false);
 
   const savedEmail = (client.email ?? '').trim().toLowerCase();
   const cleanEmail = email.trim().toLowerCase();
@@ -33,8 +35,8 @@ export const ClientInviteModal: React.FC<{
   const save = () => {
     if (!name.trim()) return setError('Enter a name.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return setError('Enter a valid email.');
-    if (clients.some((c) => c.id !== client.id && (c.email ?? '').trim().toLowerCase() === cleanEmail)) {
-      return setError('Another client already uses this email.');
+    if (clients.some((c) => c.id !== client.id && emailCooldownKey(c.email ?? '') === emailCooldownKey(cleanEmail))) {
+      return setError('This Gmail address already belongs to another client.');
     }
     onSave({ ...client, name: name.trim(), email: cleanEmail, emailReminders: reminders });
     onClose();
@@ -99,6 +101,31 @@ export const ClientInviteModal: React.FC<{
           </div>
         )}
 
+        {isCloud && !joined && (
+          <div className="mt-4">
+            <p className="text-sm text-gray-600 mb-3 break-words">
+              Send a secure invitation to <strong>{client.name}</strong> at <strong>{client.email}</strong>.
+              They will open one link, choose a password and start training.
+            </p>
+            <button
+              onClick={() => void emailInvite()}
+              disabled={mailing === 'sending' || mailing === 'sent'}
+              className="w-full flex justify-center items-center gap-2 bg-[#111827] disabled:opacity-60 text-white text-sm font-semibold py-3.5 rounded-xl"
+            >
+              {mailing === 'sending' ? <Loader2 className="w-4 h-4 animate-spin" /> : mailing === 'sent' ? <Check className="w-4 h-4" /> : <Mail className="w-4 h-4" />}
+              {mailing === 'sending' ? 'Sending invitation…' : mailing === 'sent' ? 'Invitation sent' : 'Send invitation'}
+            </button>
+            {mailing === 'sent' && <p role="status" className="text-xs text-green-700 mt-2">
+              Invitation accepted for delivery. Your client can check their inbox.
+            </p>}
+          </div>
+        )}
+        <button type="button" onClick={() => setShowDetails((value) => !value)}
+          className="w-full text-sm underline text-gray-600 py-3 mt-1">
+          {showDetails ? 'Hide details' : 'Edit details or share a link'}
+        </button>
+        {showDetails && (
+        <>
         <label className="block text-xs font-medium text-gray-600 mb-1.5">Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={`${field} mb-3`} />
         <label className="block text-xs font-medium text-gray-600 mb-1.5">Email (they sign in with this)</label>
@@ -135,16 +162,6 @@ export const ClientInviteModal: React.FC<{
         )}
 
         <div className="mt-5 p-3.5 rounded-xl bg-gray-50 border border-gray-100">
-          {isCloud && !joined && (
-            <button
-              onClick={() => void emailInvite()}
-              disabled={mailing === 'sending'}
-              className="w-full mb-3 inline-flex items-center justify-center gap-2 bg-[#111827] text-white text-sm font-semibold py-3 rounded-xl cursor-pointer disabled:opacity-60"
-            >
-              {mailing === 'sending' ? <Loader2 className="w-4 h-4 animate-spin" /> : mailing === 'sent' ? <Check className="w-4 h-4 text-[#FFC809]" /> : <Mail className="w-4 h-4 text-[#FFC809]" />}
-              {mailing === 'sent' ? `Invite sent to ${client.email}` : 'Email the invite'}
-            </button>
-          )}
           <div className="text-xs font-semibold text-[#111827] mb-1">{isCloud && !joined ? '…or share the link yourself' : 'Invite link'}</div>
           <div className="text-xs text-gray-600 break-all mb-3">{link}</div>
           <div className="grid grid-cols-2 gap-2">
@@ -163,8 +180,10 @@ export const ClientInviteModal: React.FC<{
               {copied === 'message' ? 'Copied' : 'Copy message'}
             </button>
           </div>
-          <p className="text-[11px] text-gray-500 mt-2">Save first if you changed the email, then copy.</p>
+          <p className="text-[11px] text-gray-500 mt-2">Save edits before sending or copying a link.</p>
         </div>
+        </>
+        )}
 
         {error && (
           <div className="mt-3 flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5" role="alert">
@@ -175,11 +194,13 @@ export const ClientInviteModal: React.FC<{
 
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-gray-500 cursor-pointer">
-            Cancel
+            Close
           </button>
-          <button onClick={save} className="bg-[#111827] text-white text-sm font-semibold px-5 py-2.5 rounded-xl cursor-pointer">
-            Save
-          </button>
+          {showDetails && (
+            <button onClick={save} className="bg-[#111827] text-white text-sm font-semibold px-5 py-2.5 rounded-xl cursor-pointer">
+              Save changes
+            </button>
+          )}
         </div>
       </div>
     </div>
