@@ -165,7 +165,7 @@ jobs:
                 echo "BLOCKED: $name, missing extension control"
               else
                 echo "BLOCKED: $name, unexpected isolated restore error"
-                python3 -c 'import re,sys; s=open(sys.argv[1],errors="replace").read(); m=re.search(r"ERROR:\s*([^\n]+)",s); t=m.group(1) if m else "unknown"; t=re.sub(r"[\x22\x27][^\x22\x27]*[\x22\x27]|https?://\S+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+","[redacted]",t); print("Safe restore error category: "+t[:90])' "$RUNNER_TEMP/restore-error.txt"
+                python3 -c 'import re,sys; s=open(sys.argv[1],errors="replace").read(); m=re.search(r"(?im)^(?:pg_restore: error:|ERROR:)\s*([^\n]+)",s); t=m.group(1) if m else "unknown"; t=re.sub(r"[\x22\x27][^\x22\x27]*[\x22\x27]|https?://\S+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+","[redacted]",t); print("Safe restore error category: "+t[:90])' "$RUNNER_TEMP/restore-error.txt"
               fi
               exit 1
             fi
