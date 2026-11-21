@@ -183,7 +183,7 @@ export const AuthScreen: React.FC = () => {
         )}
 
         {sent && mode === 'sign-up' && <p role="status" className="text-sm text-green-800 break-words">If this email is invited, a verification link is on its way. Check your inbox and spam, then open the link before signing in.</p>}
-        {(mode === 'sign-in' || (mode === 'sign-up' && (!!notice || sent))) && <button type="button" disabled={busy || !email.trim()} onClick={async () => { setBusy(true); const err = await resendVerification(email); setBusy(false); setError(err); if (!err) setSent(true); }} className="text-sm underline min-h-[44px]">Resend verification email</button>}
+        {(mode === 'sign-up' && sent) && <button type="button" disabled={busy || !email.trim()} onClick={async () => { setBusy(true); const err = await resendVerification(email); setBusy(false); setError(err); if (!err) setSent(true); }} className="text-sm underline min-h-[44px]">Resend verification email</button>}
         {sent && mode === 'sign-in' && <p role="status" className="text-sm text-green-800">If verification is needed, a link is on its way. Check your inbox and spam.</p>}
         {sent && mode === 'forgot' && (
           <div className="flex items-start gap-2 text-sm text-[#166534] bg-green-50 border border-green-100 rounded-xl px-3 py-2.5" role="status">
@@ -228,6 +228,54 @@ export const AuthScreen: React.FC = () => {
           {mode === 'sign-in' ? (who === 'client' ? 'Set up your account' : 'Create coach account') : 'Sign in'}
         </button>
       </div>
+    </Shell>
+  );
+};
+
+/** One secure invitation email verifies ownership. Client picks a password and starts training. */
+export const AcceptInvitationScreen: React.FC = () => {
+  const { acceptInvitation, signOut } = useSession();
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    if (busy) return;
+    setError(null);
+    if (password.length < 8 || password.length > 72) {
+      setError('Password must be 8 to 72 characters.');
+      return;
+    }
+    if (password !== confirmation) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    const err = await acceptInvitation(password);
+    setBusy(false);
+    if (err) setError(err);
+  };
+  return (
+    <Shell>
+      <h1 className="text-2xl font-bold tracking-tight text-[#111827] mb-1">Accept your invitation</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        Your email is verified. Create a password to open your training program. No second email needed.
+      </p>
+      <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="space-y-3">
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          aria-label="Create password" placeholder="Create password (8–72 characters)" autoComplete="new-password"
+          minLength={8} maxLength={72} required disabled={busy} className={input} />
+        <input type="password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)}
+          aria-label="Confirm password" placeholder="Confirm password" autoComplete="new-password"
+          minLength={8} maxLength={72} required disabled={busy} className={input} />
+        {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+        <button type="submit" disabled={busy || !password || !confirmation}
+          className="w-full inline-flex justify-center gap-2 bg-[#111827] disabled:opacity-60 text-white font-semibold py-3.5 rounded-xl">
+          {busy && <Loader2 className="w-4 h-4 animate-spin" />} Create password & continue
+        </button>
+      </form>
+      <button type="button" disabled={busy} onClick={() => void signOut()}
+        className="w-full text-sm text-gray-500 py-3 mt-2">Cancel</button>
     </Shell>
   );
 };
