@@ -154,7 +154,12 @@ describe('Route 1: send-invite (client invitation)', () => {
           ? { id: 'client-1', email: 'athlete@example.invalid', coach_id: 'coach-1', data: { name: 'Sara Test' } }
           : null
       ),
-      isClientAccountConfirmed: vi.fn(async () => false)
+      isClientAccountConfirmed: vi.fn(async () => false),
+      getInviteAccountState: vi.fn(async (_email: string): Promise<'absent' | 'pending' | 'confirmed'> => 'absent'),
+      generateInviteLink: vi.fn(async (_email: string, _name: string) =>
+        ({ hashedToken: 'invite-hash-1', userId: 'new-invite-user', error: null })),
+      generateExistingLink: vi.fn(async (_email: string) => ({ hashedToken: 'existing-hash', error: null })),
+      deleteNewInviteUser: vi.fn(async (_userId: string) => {})
     };
   };
 
@@ -208,6 +213,7 @@ describe('Route 1: send-invite (client invitation)', () => {
       deps
     );
     expect(failedRes.status).toBe(403);
+    expect(deps.deleteNewInviteUser).toHaveBeenCalledWith('new-invite-user');
 
     // Retry immediately after failure succeeds and uses active PUREFUNCTION-AISTUDIO link
     const okRes = await handleSendInvite(
@@ -218,7 +224,9 @@ describe('Route 1: send-invite (client invitation)', () => {
     const [to, subject, html] = deps.sendEmail.mock.calls[1];
     expect(to).toBe('athlete@example.invalid');
     expect(subject).toContain('Coach Armin');
-    expect(html).toContain('https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/?join=athlete%40example.invalid');
+    expect(html).toContain('https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/?invite=invite-hash-1&amp;inviteType=invite');
+    expect(html).not.toContain('verify=');
+    expect(html).toContain('No second verification email');
 
     // Duplicate click within cooldown -> 429
     clock += 10_000;
@@ -235,6 +243,49 @@ describe('Route 1: send-invite (client invitation)', () => {
       deps
     );
     expect(retryAfterCooldown.status).toBe(200);
+  });
+});
+
+describe('Secure one-email invitation authorization', () => {
+  const deps = () => ({
+    appUrl: APP_URL,
+    getUserByToken: vi.fn(async () => ({ id: 'coach-1' })),
+    getCoachProfile: vi.fn(async () => ({ role: 'coach', display_name: 'Coach' })),
+    getOwnedClient: vi.fn(async () => ({
+      id: 'client-1', email: 'client@gmail.com', coach_id: 'coach-1', data: { name: 'Client' }
+    })),
+    isClientAccountConfirmed: vi.fn(async () => false),
+    getInviteAccountState: vi.fn(async (_email: string): Promise<'absent' | 'pending' | 'confirmed'> => 'absent'),
+    generateInviteLink: vi.fn(async () => ({ hashedToken: 'new-hash', userId: 'new-uid', error: null })),
+    generateExistingLink: vi.fn(async () => ({ hashedToken: 'old-hash', error: null })),
+    deleteNewInviteUser: vi.fn(async () => {}),
+    sendEmail: vi.fn(async (_to: string, _subject: string, _html: string) => ({ ok: true as const }))
+  });
+
+  const request = postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-token' });
+
+  it('blocks confirmed identity, including Gmail alias collision, without exposing a new token', async () => {
+    const d = deps();
+    d.getInviteAccountState.mockResolvedValueOnce('confirmed');
+    const confirmed = await handleSendInvite(request, d);
+    expect(confirmed.status).toBe(409);
+    expect(d.generateInviteLink).not.toHaveBeenCalled();
+    d.getInviteAccountState.mockResolvedValueOnce('absent').mockResolvedValueOnce('confirmed');
+    const alias = await handleSendInvite(request, d);
+    expect(alias.status).toBe(409);
+    expect(d.generateInviteLink).not.toHaveBeenCalled();
+    expect(d.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('uses a magiclink token for existing unconfirmed user; does not delete it on mail failure', async () => {
+    const d = deps();
+    d.getInviteAccountState.mockResolvedValueOnce('pending').mockResolvedValueOnce('absent');
+    const result = await handleSendInvite(request, d);
+    expect(result.status).toBe(200);
+    expect(d.generateExistingLink).toHaveBeenCalledWith('client@gmail.com');
+    expect(d.generateInviteLink).not.toHaveBeenCalled();
+    expect(d.sendEmail.mock.calls[0][2]).toContain('inviteType=magiclink');
+    expect(d.deleteNewInviteUser).not.toHaveBeenCalled();
   });
 });
 
