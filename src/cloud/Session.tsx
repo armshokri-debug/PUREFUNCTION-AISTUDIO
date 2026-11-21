@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import type { Session } from '@supabase/supabase-js';
 import { isCloud, supabase, supabaseUrl } from './supabase';
 import { clearPendingRecovery, hasPendingRecovery, markPendingRecovery } from './recoveryGate';
+import { signInWithGoogleEmailFallback } from '../../supabase/functions/_shared/google-email-alias';
 
 export interface Profile {
   id: string;
@@ -234,12 +235,15 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [loadProfile]);
 
   const signIn = async (email: string, password: string, portal: Profile['role']) => {
-    if (!supabase) return 'Cloud is not configured.';
+    const authClient = supabase;
+    if (!authClient) return 'Cloud is not configured.';
     if (loginPending.current) return 'Sign-in is already in progress.';
     loginPending.current = true;
     ++profileRequest.current;
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const { data, error } = await signInWithGoogleEmailFallback(email, (address) =>
+        authClient.auth.signInWithPassword({ email: address, password })
+      );
       if (error) return friendlyAuthError(error.message);
       resetPending.current = false;
       resetCompleted.current = false;
