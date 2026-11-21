@@ -1,0 +1,31 @@
+name: One-Time Live Client Password Recovery Proof
+
+on:
+  push:
+    branches:
+      - qa/recovery-e2e-proof-20261121
+    paths:
+      - .github/workflows/one-time-recovery-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test-live-recovery:
+    if: github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium
+      - name: Run real published password-recovery acceptance with ephemeral identity
+        run: node scripts/qa/recovery-e2e-live.cjs
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
