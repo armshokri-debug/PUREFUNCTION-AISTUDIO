@@ -65,6 +65,9 @@ jobs:
             IF has_function_privilege('anon','public.pf_joined_client_ids()','EXECUTE') THEN
               RAISE EXCEPTION 'Anonymous must not list joined clients';
             END IF;
+            IF has_function_privilege('anon','public.pf_my_password_ready()','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous must not query password readiness';
+            END IF;
           END $$;
           INSERT INTO auth.users VALUES
             ('00000000-0000-0000-0000-000000000001','pending@example.com',NULL,NULL),
@@ -97,6 +100,18 @@ jobs:
               RAISE EXCEPTION 'Only accepted client with password must appear joined';
             END IF;
           END $$;
+          SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',false);
+          DO $ BEGIN
+            IF public.pf_my_password_ready() IS DISTINCT FROM true THEN
+              RAISE EXCEPTION 'Confirmed user with password must be ready';
+            END IF;
+          END $;
+          SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000003',false);
+          DO $ BEGIN
+            IF public.pf_my_password_ready() IS DISTINCT FROM false THEN
+              RAISE EXCEPTION 'Confirmed invite with no password must remain gated';
+            END IF;
+          END $;
           SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000012',false);
           DO $$ BEGIN
             IF (SELECT count(*) FROM public.pf_joined_client_ids()) != 0 THEN
