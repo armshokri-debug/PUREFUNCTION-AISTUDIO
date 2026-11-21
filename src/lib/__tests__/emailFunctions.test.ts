@@ -282,7 +282,7 @@ describe('Route 1: send-invite (client invitation)', () => {
       id: 'client-1', email: 'person@gmail.com', coach_id: 'coach-1', data: { name: 'Person' }
     });
     deps.getExistingAccount.mockResolvedValueOnce({ data: null, error: null });
-    deps.getExistingAccount.mockResolvedValueOnce({ data: null, error: { message: 'db down' } });
+    deps.getExistingAccount.mockResolvedValueOnce({ data: null, error: { message: 'db down' } as never });
     const response = await handleSendInvite(
       postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
       deps
