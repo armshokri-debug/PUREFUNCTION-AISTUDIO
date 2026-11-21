@@ -18,7 +18,7 @@ Deno.serve(async (req) => {
     getExistingAccount: async (email) => {
       // Restricted service-role lookup. A client JWT must never enumerate users.
       const { data, error } = await admin.rpc('pf_invite_existing_account', { p_email: email });
-      return { data: data as { email: string; confirmed: boolean } | null, error };
+      return { data: data as { email: string; confirmed: boolean; hasPassword: boolean } | null, error };
     },
     generateInviteLink: async (email, name) => {
       const { data, error } = await admin.auth.admin.generateLink({
@@ -65,7 +65,12 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (!profile?.id) return false;
       const { data } = await admin.auth.admin.getUserById(profile.id);
-      return Boolean(data.user?.email_confirmed_at);
+      if (!data.user?.email || !data.user.email_confirmed_at) return false;
+      const { data: state, error } = await admin.rpc('pf_invite_existing_account', {
+        p_email: data.user.email
+      });
+      if (error) throw error; // fail closed rather than claim account readiness
+      return state?.confirmed === true && state?.hasPassword === true;
     }
   });
 });
