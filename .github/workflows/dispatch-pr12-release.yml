@@ -1,0 +1,33 @@
+name: Dispatch Reviewed PR12 Release (One-Time)
+
+on:
+  push:
+    branches:
+      - release/dispatch-pr12-20261121
+    paths:
+      - .github/workflows/dispatch-pr12-release.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch-reviewed-release:
+    if: github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_MAIN_SHA: 58ea32de1f7b415d6da0f2951cae692a01d34fab
+    steps:
+      - name: Verify reviewed main SHA and start existing gated deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          if [[ "$actual_sha" != "$EXPECTED_MAIN_SHA" ]]; then
+            echo 'BLOCKED: main changed after release review'
+            exit 1
+          fi
+          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main -f "reviewed_sha=$EXPECTED_MAIN_SHA"
+          echo "Dispatched existing reviewed GitHub Pages release for main $EXPECTED_MAIN_SHA"
