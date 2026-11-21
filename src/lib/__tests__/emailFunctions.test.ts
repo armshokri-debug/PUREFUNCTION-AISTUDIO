@@ -156,7 +156,7 @@ describe('Route 1: send-invite (client invitation)', () => {
       ),
       isClientAccountConfirmed: vi.fn(async () => false),
       getExistingAccount: vi.fn(async (_email: string) => ({
-        data: null as { email: string; confirmed: boolean; hasPassword: boolean } | null, error: null
+        data: null as { email: string; confirmed: boolean; hasPassword: boolean; clientId: string | null } | null, error: null
       })),
       generateInviteLink: vi.fn(async (_email: string, _name: string) => ({
         hashedToken: 'invite-hash', userId: 'fresh-invite-uid', error: null
@@ -249,7 +249,7 @@ describe('Route 1: send-invite (client invitation)', () => {
   it('resends to an unconfirmed account using magiclink and never creates or deletes another user', async () => {
     const deps = baseDeps();
     deps.getExistingAccount.mockResolvedValueOnce({
-      data: { email: 'athlete@example.invalid', confirmed: false, hasPassword: false }, error: null
+      data: { email: 'athlete@example.invalid', confirmed: false, hasPassword: false, clientId: 'client-1' }, error: null
     });
     const response = await handleSendInvite(
       postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
@@ -265,13 +265,33 @@ describe('Route 1: send-invite (client invitation)', () => {
   it('blocks an existing confirmed account without sending another invitation or changing credentials', async () => {
     const deps = baseDeps();
     deps.getExistingAccount.mockResolvedValueOnce({
-      data: { email: 'athlete@example.invalid', confirmed: true, hasPassword: true }, error: null
+      data: { email: 'athlete@example.invalid', confirmed: true, hasPassword: true, clientId: 'client-1' }, error: null
     });
     const response = await handleSendInvite(
       postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
       deps
     );
     expect(response.status).toBe(409);
+    expect(deps.generateInviteLink).not.toHaveBeenCalled();
+    expect(deps.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('never invites a Gmail alias already mapped to another client record', async () => {
+    const deps = baseDeps();
+    deps.getOwnedClient.mockResolvedValueOnce({
+      id: 'client-1', email: 'person@gmail.com', coach_id: 'coach-1', data: { name: 'Person' }
+    });
+    deps.getExistingAccount.mockResolvedValueOnce({ data: null, error: null });
+    deps.getExistingAccount.mockResolvedValueOnce({
+      data: { email: 'person@googlemail.com', confirmed: false, hasPassword: false, clientId: 'another-client' },
+      error: null
+    });
+    const res = await handleSendInvite(
+      postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
+      deps
+    );
+    expect(res.status).toBe(409);
+    expect(deps.generateMagicLink).not.toHaveBeenCalled();
     expect(deps.generateInviteLink).not.toHaveBeenCalled();
     expect(deps.sendEmail).not.toHaveBeenCalled();
   });
