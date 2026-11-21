@@ -109,16 +109,17 @@ jobs:
   # Live read-only encrypted backup job — gated behind BOTH vars.ENABLE_SUPABASE_BACKUP == 'true'
   # AND explicit manual confirmation (or future approved schedule).
   run-encrypted-backup:
+    # Fail closed on every trigger: a schedule must never override the owner's kill-switch.
     if: >-
+      vars.ENABLE_SUPABASE_BACKUP == 'true' &&
+      github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
       (
-        github.event_name == 'schedule' &&
-        github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'
-      ) ||
-      (
-        vars.ENABLE_SUPABASE_BACKUP == 'true' &&
-        github.event_name == 'workflow_dispatch' &&
-        inputs.mode == 'live-backup' &&
-        inputs.confirm_live_backup == 'RUN_BACKUP'
+        github.event_name == 'schedule' ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          inputs.mode == 'live-backup' &&
+          inputs.confirm_live_backup == 'RUN_BACKUP'
+        )
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -148,7 +149,7 @@ jobs:
       - name: Execute read-only encrypted backup to configured external storage (S3 or Google Drive)
         id: backup
         env:
-          ENABLE_SUPABASE_BACKUP: ${{ github.event_name == 'schedule' && 'true' || vars.ENABLE_SUPABASE_BACKUP }}
+          ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}
           BACKUP_STORAGE_PROVIDER: ${{ vars.BACKUP_STORAGE_PROVIDER }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
