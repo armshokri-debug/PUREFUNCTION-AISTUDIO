@@ -357,6 +357,11 @@ export interface ClientProfile {
   email: string;
   /** Cloud: morning email on workout days (default on). */
   emailReminders?: boolean;
+  /** Soft-archive flag so coaches can hide inactive clients without losing records. */
+  archived?: boolean;
+  archivedAt?: string;
+  /** ISO timestamp when an invite email was last sent from the coach workspace. */
+  invitedAt?: string;
   avatarId: string;
   /** Profile photo the client uploaded (small data URL). Initials are shown when empty. */
   photoUrl?: string;

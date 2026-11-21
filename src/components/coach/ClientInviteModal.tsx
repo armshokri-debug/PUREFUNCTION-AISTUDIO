@@ -17,10 +17,14 @@ export const ClientInviteModal: React.FC<{
   joined: boolean | null;
   onSave: (updated: ClientProfile) => void;
   onEnsureSaved?: () => Promise<boolean>;
+  onInviteSent?: () => void;
   onClose: () => void;
-}> = ({ client, clients, joined, onSave, onEnsureSaved, onClose }) => {
+}> = ({ client, clients, joined, onSave, onEnsureSaved, onInviteSent, onClose }) => {
   const [name, setName] = useState(client.name);
   const [email, setEmail] = useState(client.email);
+  const [phaseValue, setPhaseValue] = useState<string>(
+    `${client.phaseNumber}-${client.phaseName === 'Foundations' ? 'Reposition' : client.phaseName}`
+  );
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<'link' | 'message' | null>(null);
   const [mailing, setMailing] = useState<'idle' | 'sending' | 'sent'>('idle');
@@ -39,7 +43,17 @@ export const ClientInviteModal: React.FC<{
     if (clients.some((c) => c.id !== client.id && emailCooldownKey(c.email ?? '') === emailCooldownKey(cleanEmail))) {
       return setError('This Gmail address already belongs to another client.');
     }
-    onSave({ ...client, name: name.trim(), email: cleanEmail, emailReminders: reminders });
+    const [numStr, pName] = phaseValue.split('-');
+    const nextPhaseNumber = (Number(numStr) || client.phaseNumber) as 1 | 2 | 3 | 4;
+    const nextPhaseName = (pName || client.phaseName) as ClientProfile['phaseName'];
+    onSave({
+      ...client,
+      name: name.trim(),
+      email: cleanEmail,
+      phaseNumber: nextPhaseNumber,
+      phaseName: nextPhaseName,
+      emailReminders: reminders
+    });
     onClose();
   };
 
@@ -61,7 +75,10 @@ export const ClientInviteModal: React.FC<{
     if (err) {
       setMailing('idle');
       setError(err);
-    } else setMailing('sent');
+    } else {
+      setMailing('sent');
+      onInviteSent?.();
+    }
   };
 
   const copy = async (what: 'link' | 'message') => {
@@ -86,7 +103,7 @@ export const ClientInviteModal: React.FC<{
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[#111827]">Client & invite</h2>
-          <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-gray-400 hover:text-[#111827] cursor-pointer">
+          <button onClick={onClose} aria-label="Close" className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-[#111827] cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -147,6 +164,19 @@ export const ClientInviteModal: React.FC<{
             They already have an account with the old email; changing it here doesn’t change their login.
           </p>
         )}
+
+        <label className="block text-xs font-medium text-gray-600 mt-3 mb-1.5">Phase</label>
+        <select
+          value={phaseValue}
+          onChange={(e) => setPhaseValue(e.target.value)}
+          aria-label="Client phase"
+          className={`${field} bg-white`}
+        >
+          <option value="1-Reposition">Phase 1 · Reposition</option>
+          <option value="2-Integrate">Phase 2 · Integrate</option>
+          <option value="3-Strength">Phase 3 · Strength</option>
+          <option value="4-Performance">Phase 4 · Performance</option>
+        </select>
 
         {isCloud && (
           <label className="mt-4 flex items-center justify-between gap-3 cursor-pointer">

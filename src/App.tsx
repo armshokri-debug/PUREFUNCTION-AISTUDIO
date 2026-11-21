@@ -297,6 +297,15 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
     }
   };
 
+  const handleDeleteClient = (id: string) => {
+    if (!clients.some((c) => c.id === id)) return;
+    setClients((prev) => prev.filter((c) => c.id !== id));
+    if (selectedClientIdState === id) {
+      setSelectedClientId('');
+      setClientOpen(false);
+    }
+  };
+
   const handleApplyTemplate = (template: ProgramTemplate, ids: string[], start: string) => {
     setClients((prev) => applyProgramTemplate(prev, template, ids, start).clients);
   };
@@ -354,7 +363,10 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setCoachTab(item.id)}
+                    onClick={() => {
+                      if (item.id === 'clients') setClientOpen(false);
+                      setCoachTab(item.id);
+                    }}
                     title={item.label}
                     className={`w-full flex items-center justify-center lg:justify-between px-1 lg:px-4 py-2 lg:py-2.5 rounded-2xl lg:rounded-full text-[10px] lg:text-sm transition-all cursor-pointer ${
                       isActive
@@ -571,16 +583,22 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
                   <ClientsView
                     clients={clientsWithStats}
                     selectedClientId={selectedClientId}
+                    onHighlightClient={setSelectedClientId}
                     onSelectClient={handleSelectClient}
                     onAddClient={handleAddClient}
                     onCreateTestClient={handleCreateTestClient}
+                    onDeleteClient={handleDeleteClient}
                     onDeleteTestClient={handleDeleteTestClient}
                     onUpdateClient={handleUpdateClient}
                     onEnsureSaved={profile ? store.flush : undefined}
                     joinedIds={joinedIds}
                   />
-                  {supabase && <ReferralsPanel clients={clients} />}
-                  {supabase && <CoachAccounts />}
+                  {(supabase) && (
+                    <div className="max-w-6xl mx-auto">
+                      <ReferralsPanel clients={clients} />
+                      <CoachAccounts />
+                    </div>
+                  )}
                 </>
               )
             )}
@@ -670,7 +688,10 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
             return (
               <button
                 key={item.id}
-                onClick={() => setCoachTab(item.id)}
+                onClick={() => {
+                  if (item.id === 'clients') setClientOpen(false);
+                  setCoachTab(item.id);
+                }}
                 className={`relative min-h-[44px] flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-[#111827] text-white font-semibold'
