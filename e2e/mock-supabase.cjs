@@ -241,6 +241,10 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       return json(route, 200, []);
     }
 
+    if (path === '/rest/v1/rpc/pf_my_password_ready') {
+      const u = db.users.find(u => u.id === uidFrom(req));
+      return json(route, 200, !!(u && u.confirmed && u.password));
+    }
     if (path === '/rest/v1/rpc/pf_joined_client_ids') {
       const coach = profileOf(uidFrom(req));
       if (!coach || coach.role !== 'coach') return json(route, 200, []);
