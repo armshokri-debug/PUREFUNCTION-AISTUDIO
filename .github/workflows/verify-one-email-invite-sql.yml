@@ -50,7 +50,7 @@ jobs:
           CREATE TABLE public.profiles (id uuid PRIMARY KEY, role text NOT NULL, client_id text);
           CREATE TABLE public.clients (id text PRIMARY KEY, coach_id uuid NOT NULL);
           CREATE FUNCTION private.basic_is_coach() RETURNS boolean LANGUAGE sql STABLE AS
-            $ SELECT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'coach') $;
+            $coach_gate$ SELECT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'coach') $coach_gate$;
           \i supabase/migrations/20261121123000_pf_one_email_invite.sql
           DO $$ BEGIN
             IF has_function_privilege('anon','public.pf_invite_existing_account(text)','EXECUTE') THEN
