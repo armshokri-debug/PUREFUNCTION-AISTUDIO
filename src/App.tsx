@@ -237,7 +237,7 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
     const fetchJoined = async () => {
       if (document.visibilityState === 'hidden') return;
       const { data, error } = await supabase!.rpc('pf_joined_client_ids');
-      if (!cancelled && !error && data) setJoinedIds(new Set(data as string[]));
+      if (!cancelled) setJoinedIds(error || !data ? undefined : new Set(data as string[]));
     };
     void fetchJoined();
     window.addEventListener('focus', fetchJoined);
