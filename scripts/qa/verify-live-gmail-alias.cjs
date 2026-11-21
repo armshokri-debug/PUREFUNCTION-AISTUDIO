@@ -32,11 +32,17 @@ async function run() {
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const page = await context.newPage();
+    stage = 'navigate to published site';
     await page.goto(APP, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    stage = 'fill login email';
     await page.getByRole('textbox', { name: 'Email' }).fill(enteredEmail);
+    stage = 'fill login password';
     await page.getByLabel('Password', { exact: true }).fill(password);
+    stage = 'submit login';
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    stage = 'await authenticated no-access screen';
     await page.getByRole('heading', { name: 'Almost there' }).waitFor({ timeout: 30000 });
+    stage = 'verify canonical email in authenticated screen';
     const accountText = await page.getByText('You’re signed in as').textContent();
     assert(accountText && accountText.includes(storedEmail), 'Browser did not establish stored Googlemail account session');
     stageResult('Published app signs into existing Googlemail account using Gmail spelling');
