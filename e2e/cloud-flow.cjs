@@ -88,7 +88,7 @@ const today = iso(new Date());
   await C.locator('form button[type=submit]').click();
   await C.waitForTimeout(800);
   ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'after adding a client the invite sheet opens (no jump to Assessment)');
-  await C.getByRole('button', { name: 'Close' }).click();
+  await C.getByRole('button', { name: 'Close', exact: true }).last().click();
   await C.waitForTimeout(800);
   await C.getByRole('button', { name: /Not joined · Invite/ }).click();
   ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'coach sees the client has not joined');
