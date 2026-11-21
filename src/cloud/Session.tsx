@@ -154,6 +154,9 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const verifyToken = params.get('verify');
     const start = async () => {
       if (inviteToken) {
+        // A newly opened invitation supersedes stale recovery UI state in this tab.
+        resetPending.current = false;
+        clearPendingRecovery();
         invitePending.current = true;
         markPendingInvite();
         ++profileRequest.current;
