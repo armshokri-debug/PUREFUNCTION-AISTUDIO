@@ -146,7 +146,12 @@ jobs:
             local name="$1" section="$2"
             local archive="$RUNNER_TEMP/pf-isolated-restore/db/$name.dump"
             local flags=(--no-owner --no-acl --exit-on-error --single-transaction "--section=$section")
-            if [[ "$section" == "pre-data" ]]; then
+            if [[ "$section" == "pre-data" && "$name" == "public-private-full" ]]; then
+              # The Supabase PostgreSQL image owns the 'public' schema; do not drop it.
+              /usr/lib/postgresql/18/bin/pg_restore -l "$archive" > "$RUNNER_TEMP/restore-list.txt"
+              sed -i '/^[0-9][0-9]*;.* SCHEMA - \(public\|private\) /d' "$RUNNER_TEMP/restore-list.txt"
+              flags+=(--use-list "$RUNNER_TEMP/restore-list.txt")
+            elif [[ "$section" == "pre-data" ]]; then
               flags+=(--clean --if-exists)
             fi
             if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" "${flags[@]}" "$archive" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
