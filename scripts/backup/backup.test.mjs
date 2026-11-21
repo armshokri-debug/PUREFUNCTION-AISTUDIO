@@ -237,13 +237,16 @@ describe('CLI dry-run, live-execution lock, and disabled-by-default workflow inv
     expect(exitCode).toBe(2);
   });
 
-  it('keeps .github/workflows/supabase-backup.yml disabled by default with no active schedule or artifact upload', () => {
+  it('schedules trusted read-only encrypted backups while preserving manual approvals and artifact prohibition', () => {
     const wfPath = path.resolve(process.cwd(), '.github/workflows/supabase-backup.yml');
     const yaml = fs.readFileSync(wfPath, 'utf8');
-    // Must not have an uncommented schedule: trigger
-    expect(/^\s*schedule\s*:/m.test(yaml)).toBe(false);
-    // Must gate live execution on vars.ENABLE_SUPABASE_BACKUP == 'true'
+    // Daily encrypted backups are explicitly approved and repository-scoped.
+    expect(/^\s*schedule\s*:/m.test(yaml)).toBe(true);
+    expect(yaml).toContain("github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'");
+    expect(yaml).toContain("github.event_name == 'schedule' && 'true'");
+    // Manual live execution must still require the existing secret-independent approval gate.
     expect(yaml).toContain("vars.ENABLE_SUPABASE_BACKUP == 'true'");
+    expect(yaml).toContain("inputs.confirm_live_backup == 'RUN_BACKUP'");
     // Must never upload encrypted/unencrypted DB backups as GitHub Actions artifacts
     expect(yaml).not.toContain('actions/upload-artifact');
   });
@@ -492,7 +495,7 @@ describe('Google Drive backup destination (config, OAuth, resumable upload, rete
     expect(deletedIds).toContain('man-8');
   });
 
-  it('passes CLI --validate-only for gdrive provider and keeps workflow wired & disabled by default', () => {
+  it('passes CLI --validate-only for gdrive while daily backups stay explicitly approved', () => {
     const scriptPath = path.resolve(process.cwd(), 'scripts/backup/run-backup.cjs');
     const out = execFileSync(process.execPath, [scriptPath, '--validate-only'], {
       env: { ...process.env, ...VALID_GDRIVE_ENV },
@@ -520,6 +523,7 @@ describe('Google Drive backup destination (config, OAuth, resumable upload, rete
     expect(yaml).toContain('BACKUP_GDRIVE_CLIENT_SECRET');
     expect(yaml).toContain('BACKUP_GDRIVE_REFRESH_TOKEN');
     expect(yaml).toContain('BACKUP_S3_BUCKET');
-    expect(/^\s*schedule\s*:/m.test(yaml)).toBe(false);
+    expect(/^\s*schedule\s*:/m.test(yaml)).toBe(true);
+    expect(yaml).toContain("github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'");
   });
 });
