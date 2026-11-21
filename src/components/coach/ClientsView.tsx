@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Search, Plus, X, ArrowUpRight, ClipboardCheck, Dumbbell, LineChart, FileText, Send } from 'lucide-react';
 import { ClientInviteModal } from './ClientInviteModal';
+import { isCloud } from '../../cloud/supabase';
+import { emailCooldownKey } from '../../../supabase/functions/_shared/google-email-alias';
 import { ClientProfile, ClientSection } from '../../types';
 import { ClientAvatar } from '../VisualAssets';
 
@@ -56,8 +58,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       setFormError('Enter the email your client will sign in with.');
       return;
     }
-    if (clients.some((c) => (c.email ?? '').toLowerCase() === email)) {
-      setFormError('A client with this email already exists.');
+    if (clients.some((c) => emailCooldownKey(c.email ?? '') === emailCooldownKey(email))) {
+      setFormError('A client with this email or its Gmail equivalent already exists.');
       return;
     }
     setFormError(null);
@@ -136,10 +138,12 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={clients.some((c) => c.isTestClient)} onClick={onCreateTestClient}
-            className="min-h-[44px] px-4 py-2.5 border border-gray-300 rounded-xl font-semibold text-sm disabled:opacity-50">
-            + Test Client
-          </button>
+          {!isCloud && (
+            <button type="button" disabled={clients.some((c) => c.isTestClient)} onClick={onCreateTestClient}
+              className="min-h-[44px] px-4 py-2.5 border border-gray-300 rounded-xl font-semibold text-sm disabled:opacity-50">
+              + Test Client
+            </button>
+          )}
         <button
           onClick={() => setIsAddModalOpen(true)}
           className="inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
