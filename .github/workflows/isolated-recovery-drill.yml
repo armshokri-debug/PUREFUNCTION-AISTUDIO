@@ -114,6 +114,16 @@ jobs:
             const required=['db/public-private-full.dump','db/auth-full.dump','db/storage-schema-full.dump','db/supabase-migrations.dump'];
             if(required.some(x=>!listing.includes(x)&&!listing.includes('./'+x)))throw Error('Archive lacks recovery components');
             execFileSync('tar',['-xzf',tp,'-C',dir,'--no-same-owner','--no-same-permissions'],{stdio:'ignore'});
+            const inventory=JSON.parse(fs.readFileSync(path.join(dir,'storage','storage-inventory.json'),'utf8'));
+            const objects=inventory.objects||[];
+            const storageRoot=path.resolve(dir,'storage','files');
+            if(inventory.objectCount!==objects.length)throw Error('Storage inventory count mismatch');
+            for(const item of objects){
+              const file=path.resolve(storageRoot,item.bucket,item.path);
+              if(!file.startsWith(storageRoot+path.sep)||!fs.existsSync(file))throw Error('Storage object missing or unsafe path');
+              if((await sha256File(file))!==item.sha256||fs.statSync(file).size!==item.size)throw Error('Storage object hash mismatch');
+            }
+            console.log('PASS: Storage files verified against encrypted inventory ('+objects.length+' objects)');
             console.log('PASS: Backup decrypted and required recovery components validated');
           })().catch(e=>{console.error('FAILED: Isolated recovery preflight ('+e.message.replace(/[\r\n]/g,' ').slice(0,120)+')');process.exitCode=1;});
           NODE
