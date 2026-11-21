@@ -15,6 +15,26 @@ Deno.serve(async (req) => {
     appUrl: APP_URL,
     cooldown: inviteCooldown,
     sendEmail: sendTransactionalEmail,
+    getExistingAccount: async (email) => {
+      // Restricted service-role lookup. A client JWT must never enumerate users.
+      const { data, error } = await admin.rpc('pf_invite_existing_account', { p_email: email });
+      return { data: data as { email: string; confirmed: boolean } | null, error };
+    },
+    generateInviteLink: async (email, name) => {
+      const { data, error } = await admin.auth.admin.generateLink({
+        type: 'invite', email,
+        options: { data: { display_name: name } }
+      });
+      return { hashedToken: data.properties?.hashed_token, userId: data.user?.id, error };
+    },
+    generateMagicLink: async (email) => {
+      const { data, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
+      return { hashedToken: data.properties?.hashed_token, error };
+    },
+    deleteNewUser: async (id) => {
+      const { error } = await admin.auth.admin.deleteUser(id);
+      if (error) throw error;
+    },
     getUserByToken: async (token) => {
       const { data } = await admin.auth.getUser(token);
       return data.user ? { id: data.user.id } : null;
