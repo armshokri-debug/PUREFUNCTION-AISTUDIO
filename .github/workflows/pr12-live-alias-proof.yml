@@ -1,0 +1,50 @@
+name: One-Time PR12 Live Gmail Alias Proof
+
+on:
+  push:
+    branches:
+      - qa/pr12-live-google-alias-proof-20261121
+    paths:
+      - .github/workflows/pr12-live-alias-proof.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prove-live-alias:
+    if: github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium
+      - name: Wait for approved PR12 GitHub Pages publication and smoke success
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 42); do
+            status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/44898978402" --jq '.status')"
+            conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/44898978402" --jq '.conclusion // ""')"
+            if [[ "$status" == 'completed' ]]; then
+              [[ "$conclusion" == 'success' ]] || { echo 'BLOCKED: Pages deployment did not pass'; exit 1; }
+              echo 'PASS Approved PR12 Pages deploy and smoke tests';
+              exit 0;
+            fi
+            sleep 15
+          done
+          echo 'BLOCKED: Pages deploy still pending'
+          exit 1
+      - name: Prove Googlemail login via Gmail alias and request live client reset
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/qa/verify-live-gmail-alias.cjs
