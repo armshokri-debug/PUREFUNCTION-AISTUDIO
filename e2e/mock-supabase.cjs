@@ -24,7 +24,7 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
     expires_in: 3600,
     expires_at: Math.floor(Date.now() / 1000) + 3600,
     refresh_token: 'ref-' + u.id,
-    user: { id: u.id, aud: 'authenticated', role: 'authenticated', email: u.email, user_metadata: u.meta || {}, app_metadata: {}, created_at: new Date().toISOString() }
+    user: { id: u.id, aud: 'authenticated', role: 'authenticated', email: u.email, email_confirmed_at: u.confirmed ? new Date().toISOString() : null, user_metadata: u.meta || {}, app_metadata: {}, created_at: new Date().toISOString() }
   });
   const uidFrom = (req) => {
     const m = (req.headers()['authorization'] || '').match(/tok-(.+)$/);
@@ -119,7 +119,18 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       const b = JSON.parse(req.postData() || '{}');
       const c = db.clients.find((c) => c.id === b.clientId);
       if (!c || c.coach_id !== prof.id || !c.email) return json(route, 400, { error: 'This client has no email yet.' });
-      db.emails.push({ to: c.email, kind: 'invite' });
+      if (db.profiles.some(p => p.client_id === c.id && db.users.some(u => u.id === p.id && u.confirmed))) {
+        return json(route, 409, { error: 'This client already has an active account.' });
+      }
+      let u = db.users.find(u => u.email === c.email);
+      if (u && u.confirmed) return json(route, 409, { error: 'Account already exists' });
+      if (!u) {
+        u = { id: crypto.randomUUID(), email: c.email, password: '', confirmed: false, meta: { display_name: c.data.name } };
+        db.users.push(u); linkUser(u);
+      }
+      const token = 'invite-' + crypto.randomUUID();
+      db.verificationTokens[token] = u.id;
+      db.emails.push({ to: c.email, kind: 'invite', token });
       return json(route, 200, { ok: true });
     }
     if (path === '/functions/v1/reset-password') {
@@ -137,7 +148,7 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
     // ---------------- Auth ----------------
     if (path === '/auth/v1/verify' && method === 'POST') {
       const b = JSON.parse(req.postData() || '{}');
-      const verification = b.type === 'signup' || b.type === 'magiclink';
+      const verification = b.type === 'signup' || b.type === 'magiclink' || b.type === 'invite';
       const tokens = verification ? db.verificationTokens : db.resetTokens;
       const id = tokens[b.token_hash];
       delete tokens[b.token_hash];
@@ -232,6 +243,14 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       return json(route, 200, []);
     }
 
+    if (path === '/rest/v1/rpc/pf_confirmed_client_ids') {
+      const prof = profileOf(uidFrom(req));
+      if (!prof || prof.role !== 'coach') return json(route, 200, []);
+      const joined = db.profiles.filter(p => p.role === 'client' && db.users.some(u => u.id === p.id && u.confirmed))
+        .filter(p => db.clients.some(c => c.id === p.client_id && c.coach_id === prof.id))
+        .map(p => ({ client_id: p.client_id }));
+      return json(route, 200, joined);
+    }
     if (path === '/rest/v1/rpc/pf_head_coach') return json(route, 200, false);
     if (path === '/rest/v1/rpc/save_workout_results_secure') {
       const prof = profileOf(uidFrom(req)); const x = JSON.parse(req.postData() || '{}');
