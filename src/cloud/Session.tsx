@@ -120,6 +120,25 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? 'This is a client account. Choose “I’m a client” to sign in.'
         : 'This is a coach account. Choose “I’m the coach” to sign in.';
     }
+    if (data.role === 'client') {
+      // Invite OTP creates a valid Supabase session before password selection.
+      // Do not let another tab load workouts until activation is complete.
+      const { data: ready, error: gateError } = await supabase.rpc('pf_my_password_ready');
+      if (request !== profileRequest.current || resetPending.current || invitePending.current || resetCompleted.current) return null;
+      if (gateError) {
+        setProfile(null);
+        setStatus('no-access');
+        return 'Could not check account activation. Please try again.';
+      }
+      if (ready !== true) {
+        invitePending.current = true;
+        markPendingInvite();
+        setSession(s);
+        setProfile(null);
+        setStatus('invite');
+        return null;
+      }
+    }
     const next: Profile = {
       id: data.id,
       role: data.role,
