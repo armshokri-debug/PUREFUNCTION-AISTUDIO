@@ -6,6 +6,7 @@ on:
       - qa/pr12-live-google-alias-proof-20261121
     paths:
       - .github/workflows/pr12-live-alias-proof.yml
+      - scripts/qa/verify-live-gmail-alias.cjs
 
 permissions:
   contents: read
