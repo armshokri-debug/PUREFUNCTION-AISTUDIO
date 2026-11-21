@@ -30,7 +30,7 @@ export const ClientInviteModal: React.FC<{
   const savedEmail = (client.email ?? '').trim().toLowerCase();
   const cleanEmail = email.trim().toLowerCase();
   const link = inviteLink(cleanEmail);
-  const message = `Hi ${name.split(' ')[0] || ''}! I've set up your training in Pure Function.\n1. Open: ${link}\n2. Tap "Set up your account" and choose a password (your email ${cleanEmail} is already filled in).\nAfter that, sign in any time as a client to see your workouts.`;
+  const message = `Hi ${name.split(' ')[0] || ''}! Your coach invited you to Pure Function.\nOpen this manual setup link: ${link}\nChoose your password, then confirm your email using the second message that arrives. The secure email invitation above avoids this extra step.`;
 
   const save = () => {
     if (!name.trim()) return setError('Enter a name.');
@@ -64,6 +64,7 @@ export const ClientInviteModal: React.FC<{
   };
 
   const copy = async (what: 'link' | 'message') => {
+    if (cleanEmail !== savedEmail) return setError('Save the changed email before copying a link.');
     try {
       await navigator.clipboard.writeText(what === 'link' ? link : message);
       setCopied(what);
@@ -162,7 +163,7 @@ export const ClientInviteModal: React.FC<{
         )}
 
         <div className="mt-5 p-3.5 rounded-xl bg-gray-50 border border-gray-100">
-          <div className="text-xs font-semibold text-[#111827] mb-1">{isCloud && !joined ? '…or share the link yourself' : 'Invite link'}</div>
+          <div className="text-xs font-semibold text-[#111827] mb-1">'Manual setup link (needs separate email verification)'</div>
           <div className="text-xs text-gray-600 break-all mb-3">{link}</div>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -180,7 +181,7 @@ export const ClientInviteModal: React.FC<{
               {copied === 'message' ? 'Copied' : 'Copy message'}
             </button>
           </div>
-          <p className="text-[11px] text-gray-500 mt-2">Save edits before sending or copying a link.</p>
+          <p className="text-[11px] text-gray-500 mt-2">For one-email setup, use Send invitation above. Manual setup links require a second verification email.</p>
         </div>
         </>
         )}
