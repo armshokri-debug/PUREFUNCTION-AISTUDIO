@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import type { Session } from '@supabase/supabase-js';
 import { isCloud, supabase, supabaseUrl } from './supabase';
 import { clearPendingRecovery, hasPendingRecovery, markPendingRecovery } from './recoveryGate';
+import { alternateGoogleMailDomain } from '../../supabase/functions/_shared/google-email-alias';
 
 export interface Profile {
   id: string;
@@ -239,7 +240,14 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     loginPending.current = true;
     ++profileRequest.current;
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const submittedEmail = email.trim();
+      let { data, error } = await supabase.auth.signInWithPassword({ email: submittedEmail, password });
+      // Only Google's documented domain aliases may fall back. Never rewrite other providers
+      // or try another identity after a non-credentials failure (e.g. unconfirmed email).
+      const alternate = alternateGoogleMailDomain(submittedEmail);
+      if (error && alternate && /invalid login credentials/i.test(error.message)) {
+        ({ data, error } = await supabase.auth.signInWithPassword({ email: alternate, password }));
+      }
       if (error) return friendlyAuthError(error.message);
       resetPending.current = false;
       resetCompleted.current = false;
