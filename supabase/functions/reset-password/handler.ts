@@ -8,6 +8,7 @@ import {
   type SendEmailOptions,
   type SendResult
 } from '../_shared/email-core.ts';
+import { alternateGoogleMailDomain, emailCooldownKey } from '../_shared/google-email-alias.ts';
 
 export const RESET_COOLDOWN_MS = 60_000;
 
@@ -38,18 +39,30 @@ export async function handleResetPassword(req: Request, deps: ResetPasswordDeps)
     warn(JSON.stringify({ event: 'password_recovery_failed', reason, ...(status === undefined ? {} : { status }) }));
 
   const now = deps.now ? deps.now() : Date.now();
-  if (deps.cooldown?.isActive(addr, RESET_COOLDOWN_MS, now)) {
+  if (deps.cooldown?.isActive(emailCooldownKey(addr), RESET_COOLDOWN_MS, now)) {
     info(JSON.stringify({ event: 'password_recovery_cooldown' }));
     return json(200, { ok: true });
   }
 
   try {
-    const { hashedToken, error } = await deps.generateRecoveryLink(addr);
+    // Existing users may have registered with googlemail.com instead of gmail.com.
+    // Generate a link for the stored address, not a new or guessed identity.
+    let recipient = addr;
+    let { hashedToken, error } = await deps.generateRecoveryLink(recipient);
+    const alternate = alternateGoogleMailDomain(addr);
+    if ((!hashedToken || error) && alternate) {
+      const retry = await deps.generateRecoveryLink(alternate);
+      if (!retry.error && retry.hashedToken) {
+        recipient = alternate;
+        hashedToken = retry.hashedToken;
+        error = null;
+      }
+    }
     if (!error && hashedToken) {
       const link = new URL(deps.appUrl);
       link.searchParams.set('reset', hashedToken);
       const r = await deps.sendEmail(
-        addr,
+        recipient,
         'Reset your Pure Function password',
         layout(
           'Reset your password',
@@ -63,7 +76,7 @@ export async function handleResetPassword(req: Request, deps: ResetPasswordDeps)
       if (!r.ok) {
         report(classifyMailFailure(r), r.status);
       } else {
-        deps.cooldown?.mark(addr, RESET_COOLDOWN_MS, now);
+        deps.cooldown?.mark(emailCooldownKey(addr), RESET_COOLDOWN_MS, now);
         info(JSON.stringify({ event: 'password_recovery_mail_accepted' }));
       }
     } else {
