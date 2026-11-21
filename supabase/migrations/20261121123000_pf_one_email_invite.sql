@@ -1,0 +1,38 @@
+-- Invites are service-role only. Never let a public caller enumerate accounts.
+create or replace function public.pf_invite_existing_account(p_email text)
+returns jsonb
+language sql stable security definer
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'email', u.email,
+    'confirmed', u.email_confirmed_at is not null
+  )
+  from auth.users u
+  where pg_catalog.lower(u.email) = pg_catalog.lower(pg_catalog.btrim(p_email))
+  limit 1;
+$$;
+revoke execute on function public.pf_invite_existing_account(text) from public, anon, authenticated;
+grant execute on function public.pf_invite_existing_account(text) to service_role;
+
+-- A created Auth profile does not prove a client finished onboarding.
+-- Expose only confirmed, password-enabled records owned by the calling coach.
+create or replace function public.pf_joined_client_ids()
+returns setof text
+language sql stable security definer
+set search_path = ''
+as $$
+  select c.id
+  from public.clients c
+  join public.profiles p on p.client_id = c.id and p.role = 'client'
+  join auth.users u on u.id = p.id
+  where c.coach_id = (select auth.uid())
+    and exists (
+      select 1 from public.profiles own
+      where own.id = (select auth.uid()) and own.role = 'coach'
+    )
+    and u.email_confirmed_at is not null
+    and pg_catalog.length(pg_catalog.coalesce(u.encrypted_password, '')) > 0;
+$$;
+revoke execute on function public.pf_joined_client_ids() from public, anon;
+grant execute on function public.pf_joined_client_ids() to authenticated;
