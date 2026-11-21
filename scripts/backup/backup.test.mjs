@@ -240,13 +240,18 @@ describe('CLI dry-run, live-execution lock, and disabled-by-default workflow inv
   it('schedules trusted read-only encrypted backups while preserving manual approvals and artifact prohibition', () => {
     const wfPath = path.resolve(process.cwd(), '.github/workflows/supabase-backup.yml');
     const yaml = fs.readFileSync(wfPath, 'utf8');
-    // Daily encrypted backups are explicitly approved and repository-scoped.
+    // Daily backups must be repository-scoped and must NEVER bypass the owner's kill-switch.
     expect(/^\s*schedule\s*:/m.test(yaml)).toBe(true);
-    expect(yaml).toContain("github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'");
-    expect(yaml).toContain("github.event_name == 'schedule' && 'true'");
-    // Manual live execution must still require the existing secret-independent approval gate.
-    expect(yaml).toContain("vars.ENABLE_SUPABASE_BACKUP == 'true'");
-    expect(yaml).toContain("inputs.confirm_live_backup == 'RUN_BACKUP'");
+    const liveJob = yaml.slice(yaml.indexOf('  run-encrypted-backup:'));
+    expect(liveJob).toMatch(/if:\s*>-\s*\n\s*vars\.ENABLE_SUPABASE_BACKUP == 'true' &&/);
+    expect(liveJob).toContain("github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO'");
+    expect(liveJob).toContain("github.event_name == 'schedule' ||");
+    expect(liveJob).toContain("inputs.confirm_live_backup == 'RUN_BACKUP'");
+    expect(liveJob).toContain('ENABLE_SUPABASE_BACKUP: ${{ vars.ENABLE_SUPABASE_BACKUP }}');
+    expect(liveJob).not.toContain("github.event_name == 'schedule' && 'true'");
+    expect(liveJob).not.toContain("ENABLE_SUPABASE_BACKUP: ${{ github.event_name == 'schedule'");
+    // Manual live execution must still require explicit approval; no runner artifacts.
+
     // Must never upload encrypted/unencrypted DB backups as GitHub Actions artifacts
     expect(yaml).not.toContain('actions/upload-artifact');
   });
