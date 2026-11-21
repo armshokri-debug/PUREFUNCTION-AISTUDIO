@@ -194,6 +194,12 @@ const today = iso(new Date());
   await R.reload();
   await R.getByRole('heading', { name: 'Accept your invitation' }).waitFor();
   ok(true, 'unfinished invitation remains safely password-gated after refresh');
+  // A second tab shares Supabase localStorage but must not bypass password selection.
+  const OtherTab = await R.context().newPage();
+  await OtherTab.goto(`http://localhost:${PORT}/`);
+  await OtherTab.getByRole('heading', { name: 'Accept your invitation' }).waitFor({ timeout: 10000 });
+  ok(await OtherTab.getByText('Goblet Squat').count() === 0, 'new tab cannot open client workspace before invite password is set');
+  await OtherTab.close();
   await R.getByLabel('Create password').fill('ryanpass1');
   await R.getByLabel('Confirm password').fill('ryanpass1');
   await R.getByRole('button', { name: 'Create password & continue' }).click();
