@@ -6,7 +6,8 @@ set search_path = ''
 as $$
   select pg_catalog.jsonb_build_object(
     'email', u.email,
-    'confirmed', u.email_confirmed_at is not null
+    'confirmed', u.email_confirmed_at is not null,
+    'hasPassword', length(coalesce(u.encrypted_password, '')) > 0
   )
   from auth.users u
   where pg_catalog.lower(u.email) = pg_catalog.lower(pg_catalog.btrim(p_email))
