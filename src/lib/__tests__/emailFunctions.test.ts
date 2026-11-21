@@ -154,7 +154,15 @@ describe('Route 1: send-invite (client invitation)', () => {
           ? { id: 'client-1', email: 'athlete@example.invalid', coach_id: 'coach-1', data: { name: 'Sara Test' } }
           : null
       ),
-      isClientAccountConfirmed: vi.fn(async () => false)
+      isClientAccountConfirmed: vi.fn(async () => false),
+      getExistingAccount: vi.fn(async (_email: string) => ({
+        data: null as { email: string; confirmed: boolean } | null, error: null
+      })),
+      generateInviteLink: vi.fn(async (_email: string, _name: string) => ({
+        hashedToken: 'invite-hash', userId: 'fresh-invite-uid', error: null
+      })),
+      generateMagicLink: vi.fn(async (_email: string) => ({ hashedToken: 'magic-hash', error: null })),
+      deleteNewUser: vi.fn(async (_id: string) => {})
     };
   };
 
@@ -218,7 +226,9 @@ describe('Route 1: send-invite (client invitation)', () => {
     const [to, subject, html] = deps.sendEmail.mock.calls[1];
     expect(to).toBe('athlete@example.invalid');
     expect(subject).toContain('Coach Armin');
-    expect(html).toContain('https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/?join=athlete%40example.invalid');
+    expect(html).toContain('https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/?invite=invite-hash');
+    expect(html).not.toContain('verify=');
+    expect(deps.deleteNewUser).toHaveBeenCalledWith('fresh-invite-uid');
 
     // Duplicate click within cooldown -> 429
     clock += 10_000;
@@ -235,6 +245,52 @@ describe('Route 1: send-invite (client invitation)', () => {
       deps
     );
     expect(retryAfterCooldown.status).toBe(200);
+  });
+  it('resends to an unconfirmed account using magiclink and never creates or deletes another user', async () => {
+    const deps = baseDeps();
+    deps.getExistingAccount.mockResolvedValueOnce({
+      data: { email: 'athlete@example.invalid', confirmed: false }, error: null
+    });
+    const response = await handleSendInvite(
+      postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
+      deps
+    );
+    expect(response.status).toBe(200);
+    expect(deps.generateMagicLink).toHaveBeenCalledWith('athlete@example.invalid');
+    expect(deps.generateInviteLink).not.toHaveBeenCalled();
+    expect(deps.deleteNewUser).not.toHaveBeenCalled();
+    expect(deps.sendEmail.mock.calls[0][2]).toContain('?invite=magic-hash&amp;inviteType=magiclink');
+  });
+
+  it('blocks an existing confirmed account without sending another invitation or changing credentials', async () => {
+    const deps = baseDeps();
+    deps.getExistingAccount.mockResolvedValueOnce({
+      data: { email: 'athlete@example.invalid', confirmed: true }, error: null
+    });
+    const response = await handleSendInvite(
+      postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
+      deps
+    );
+    expect(response.status).toBe(409);
+    expect(deps.generateInviteLink).not.toHaveBeenCalled();
+    expect(deps.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('checks Gmail alias before creating a second account; fails closed if lookup fails', async () => {
+    const deps = baseDeps();
+    deps.getOwnedClient.mockResolvedValue({
+      id: 'client-1', email: 'person@gmail.com', coach_id: 'coach-1', data: { name: 'Person' }
+    });
+    deps.getExistingAccount.mockResolvedValueOnce({ data: null, error: null });
+    deps.getExistingAccount.mockResolvedValueOnce({ data: null, error: { message: 'db down' } });
+    const response = await handleSendInvite(
+      postJson('https://fn.local/send-invite', { clientId: 'client-1' }, { Authorization: 'Bearer coach-jwt' }),
+      deps
+    );
+    expect(response.status).toBe(503);
+    expect(deps.getExistingAccount.mock.calls.map(([email]) => email))
+      .toEqual(['person@gmail.com', 'person@googlemail.com']);
+    expect(deps.generateInviteLink).not.toHaveBeenCalled();
   });
 });
 
