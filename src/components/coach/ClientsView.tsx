@@ -167,10 +167,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={clients.some((c) => c.isTestClient)} onClick={onCreateTestClient}
+          {!onEnsureSaved && <button type="button" disabled={clients.some((c) => c.isTestClient)} onClick={onCreateTestClient}
             className="min-h-[44px] px-4 py-2.5 border border-gray-300 rounded-xl font-semibold text-sm disabled:opacity-50">
             + Test Client
-          </button>
+          </button>}
         <button
           onClick={() => setIsAddModalOpen(true)}
           className="inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
@@ -187,7 +187,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           <div className="py-12 px-6 text-center">
             <p className="text-sm text-gray-500 mb-3">
               {clients.length === 0
-                ? 'No clients yet. Tap “Add client” and enter their email — they’ll use it to create their account.'
+                ? 'No clients yet. Tap “Add client”, enter their details, and send a secure invitation in one action.'
                 : `No clients match "${searchQuery}".`}
             </p>
             {searchQuery && (
@@ -202,6 +202,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         ) : (
           filteredClients.map((client) => {
             const isSelected = client.id === selectedClientId;
+            const identityCollision = clients.some(c => c.id !== client.id && emailCooldownKey(c.email) === emailCooldownKey(client.email));
             return (
               <div
                 key={client.id}
@@ -221,6 +222,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       Phase {client.phaseNumber} · {client.phaseName}
                     </span>
                     {client.isTestClient && <span className="text-xs font-bold rounded-full bg-[#FEF3C7] px-3 py-1">DEMO — NOT REAL</span>}
+                    {identityCollision && <span title="These records share one mailbox and must be reviewed before inviting" className="text-xs font-semibold text-red-700">Duplicate email · review</span>}
                     {joinedIds && !joinedIds.has(client.id) && !client.isTestClient && (
                       <button
                         onClick={(e) => {
