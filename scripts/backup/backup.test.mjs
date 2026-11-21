@@ -255,8 +255,8 @@ describe('CLI dry-run, live-execution lock, and disabled-by-default workflow inv
     const beforeLiveDump = liveJob.slice(0, liveJob.indexOf('      - name: Execute read-only encrypted backup'));
     expect(beforeLiveDump).toContain('PG17_BIN="/usr/lib/postgresql/17/bin"');
     expect(beforeLiveDump).toContain('echo "$PG17_BIN" >> "$GITHUB_PATH"');
-    expect(beforeLiveDump).toContain("pg_dump --version | grep -E '^pg_dump");
-    expect(beforeLiveDump).toContain("psql --version | grep -E '^psql");
+    expect(beforeLiveDump).toContain("pg_dump --version | grep -F 'pg_dump (PostgreSQL) 17.'");
+    expect(beforeLiveDump).toContain("psql --version | grep -F 'psql (PostgreSQL) 17.'");
     // Manual live execution must still require explicit approval; no runner artifacts.
 
     // Must never upload encrypted/unencrypted DB backups as GitHub Actions artifacts
