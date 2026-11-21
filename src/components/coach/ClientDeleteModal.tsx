@@ -2,9 +2,16 @@ import React, { useState } from 'react';
 import { AlertCircle, AlertTriangle, Archive, Loader2, X } from 'lucide-react';
 import { ClientProfile } from '../../types';
 
+export type DeleteClientOutcome =
+  | { ok: true }
+  | { ok: false; error: string; retryable?: boolean };
+
 interface ClientDeleteModalProps {
   client: ClientProfile;
-  onConfirmDelete: (clientId: string, confirmName: string) => Promise<string | null> | string | null | void;
+  onConfirmDelete: (
+    clientId: string,
+    confirmName: string
+  ) => Promise<DeleteClientOutcome | string | null | void> | DeleteClientOutcome | string | null | void;
   onArchiveInstead?: (client: ClientProfile) => void;
   onClose: () => void;
 }
@@ -18,6 +25,7 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
   const [confirmName, setConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const isTest = Boolean(client.isTestClient);
   const canDelete = isTest || confirmName.trim().toLowerCase() === client.name.trim().toLowerCase();
 
@@ -27,16 +35,24 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
     setDeleting(true);
     setError(null);
     try {
-      const err = await onConfirmDelete(client.id, confirmName.trim());
-      if (err) {
+      const outcome = await onConfirmDelete(client.id, confirmName.trim());
+      if (typeof outcome === 'string') {
         setDeleting(false);
-        setError(err);
+        setError(outcome);
+        setCanRetry(false);
+        return;
+      }
+      if (outcome && typeof outcome === 'object' && outcome.ok === false) {
+        setDeleting(false);
+        setError(outcome.error);
+        setCanRetry(Boolean(outcome.retryable));
         return;
       }
       onClose();
     } catch {
       setDeleting(false);
-      setError('Could not delete this client safely. Try again.');
+      setError('Connection interrupted before deletion finished. Click Retry Delete to resume safely.');
+      setCanRetry(true);
     }
   };
 
@@ -117,6 +133,7 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
                 onChange={(e) => {
                   setConfirmName(e.target.value);
                   if (error) setError(null);
+                  if (canRetry) setCanRetry(false);
                 }}
                 placeholder={client.name}
                 autoComplete="off"
@@ -147,7 +164,7 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
               className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-sm font-semibold transition-colors cursor-pointer"
             >
               {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
-              <span>{deleting ? 'Deleting…' : 'Delete Client'}</span>
+              <span>{deleting ? 'Deleting…' : canRetry ? 'Retry Delete' : 'Delete Client'}</span>
             </button>
           </div>
         </form>

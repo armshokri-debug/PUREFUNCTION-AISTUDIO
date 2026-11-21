@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { ClientInviteModal } from './ClientInviteModal';
 import { ClientActionMenu } from './ClientActionMenu';
-import { ClientDeleteModal } from './ClientDeleteModal';
+import { ClientDeleteModal, type DeleteClientOutcome } from './ClientDeleteModal';
 import { ClientProfile, ClientSection } from '../../types';
 import { ClientAvatar } from '../VisualAssets';
 import { duplicateClientEmailMessage, findDuplicateClientByEmail } from '../../lib/clients';
@@ -37,9 +37,15 @@ interface ClientsViewProps {
   onUpdateClient?: (updated: ClientProfile) => void;
   onEnsureSaved?: () => Promise<boolean>;
   showTestClientButton?: boolean;
+  permanentDeleteEnabled?: boolean;
   onCreateTestClient?: () => void;
-  onDeleteClient?: (id: string, confirmName: string) => Promise<string | null> | string | null | void;
-  onDeleteTestClient: (id: string) => Promise<string | null> | string | null | void;
+  onDeleteClient?: (
+    id: string,
+    confirmName: string
+  ) => Promise<DeleteClientOutcome | string | null | void> | DeleteClientOutcome | string | null | void;
+  onDeleteTestClient: (
+    id: string
+  ) => Promise<DeleteClientOutcome | string | null | void> | DeleteClientOutcome | string | null | void;
   /** client ids that have an account (cloud only; undefined in demo mode) */
   joinedIds?: Set<string>;
 }
@@ -91,6 +97,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   onUpdateClient,
   onEnsureSaved,
   showTestClientButton = false,
+  permanentDeleteEnabled = true,
   onCreateTestClient,
   onDeleteClient,
   onDeleteTestClient,
@@ -213,17 +220,32 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     }
   };
 
-  const handleConfirmDelete = async (clientId: string, confirmName: string): Promise<string | null> => {
+  const handleConfirmDelete = async (
+    clientId: string,
+    confirmName: string
+  ): Promise<DeleteClientOutcome> => {
     const target = clients.find((c) => c.id === clientId);
-    if (!target) return 'Client not found.';
-    const err = target.isTestClient
+    if (!target) return { ok: false, error: 'Client not found.', retryable: false };
+    if (!target.isTestClient && !permanentDeleteEnabled) {
+      return {
+        ok: false,
+        error: 'Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead.',
+        retryable: false
+      };
+    }
+    const raw = target.isTestClient
       ? await onDeleteTestClient(clientId)
       : onDeleteClient
         ? await onDeleteClient(clientId, confirmName)
         : 'Client deletion is not available.';
-    if (err) return err;
+    if (typeof raw === 'string') {
+      return { ok: false, error: raw, retryable: false };
+    }
+    if (raw && typeof raw === 'object' && raw.ok === false) {
+      return raw;
+    }
     setMobileDetailOpen(false);
-    return null;
+    return { ok: true };
   };
 
   // Real numbers across active clients
@@ -611,9 +633,14 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       }
                       onDelete={
                         activeSelection.isTestClient || onDeleteClient
-                          ? () => setDeleteTargetId(activeSelection.id)
+                          ? () => {
+                              if (!activeSelection.isTestClient && !permanentDeleteEnabled) return;
+                              setDeleteTargetId(activeSelection.id);
+                            }
                           : undefined
                       }
+                      deleteDisabled={!activeSelection.isTestClient && !permanentDeleteEnabled}
+                      deleteDisabledReason="Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead."
                     />
                   </div>
                 </div>

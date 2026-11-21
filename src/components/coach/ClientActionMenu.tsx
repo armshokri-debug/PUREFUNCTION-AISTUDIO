@@ -20,6 +20,8 @@ interface ClientActionMenuProps {
   onInvite?: () => void;
   onToggleArchive?: () => void;
   onDelete?: () => void;
+  deleteDisabled?: boolean;
+  deleteDisabledReason?: string;
 }
 
 export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
@@ -32,7 +34,9 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
   onEdit,
   onInvite,
   onToggleArchive,
-  onDelete
+  onDelete,
+  deleteDisabled = false,
+  deleteDisabledReason
 }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -144,11 +148,27 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
             <button
               type="button"
               role="menuitem"
-              onClick={() => run(onDelete)}
-              className="w-full min-h-[44px] px-3.5 py-2 flex items-center gap-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+              disabled={deleteDisabled}
+              aria-disabled={deleteDisabled || undefined}
+              title={deleteDisabled ? deleteDisabledReason : undefined}
+              onClick={() => {
+                if (!deleteDisabled) run(onDelete);
+              }}
+              className={`w-full min-h-[44px] px-3.5 py-2 flex items-center gap-2.5 text-left text-sm font-medium transition-colors ${
+                deleteDisabled
+                  ? 'text-gray-400 cursor-not-allowed'
+                  : 'text-red-600 hover:bg-red-50 cursor-pointer'
+              }`}
             >
               <Trash2 className="w-4 h-4 shrink-0" />
-              <span>Delete Client</span>
+              <span className="min-w-0 truncate">
+                Delete Client
+                {deleteDisabled && (
+                  <span className="block text-[11px] font-normal text-gray-400">
+                    Unavailable · use Archive
+                  </span>
+                )}
+              </span>
             </button>
           )}
         </div>

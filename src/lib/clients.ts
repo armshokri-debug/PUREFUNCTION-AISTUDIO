@@ -31,6 +31,27 @@ export function duplicateClientEmailMessage(rawEmail: string, existingEmail?: st
   return 'A client with this email already exists.';
 }
 
+export interface ClientDeletionEnv {
+  isCloud: boolean;
+  enableSafeDeleteFlag?: string;
+}
+
+/**
+ * Permanent deletion of real clients in cloud mode stays disabled by default
+ * until the staged, idempotent deletion function and durable job table are
+ * deployed, verified, and explicitly opted in via VITE_ENABLE_SAFE_CLIENT_DELETE=true.
+ * Archiving always remains available without deleting records.
+ */
+export function canPermanentlyDeleteClient(
+  env: ClientDeletionEnv = {
+    isCloud: Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY),
+    enableSafeDeleteFlag: import.meta.env.VITE_ENABLE_SAFE_CLIENT_DELETE as string | undefined
+  }
+): boolean {
+  if (!env.isCloud) return true;
+  return env.enableSafeDeleteFlag === 'true';
+}
+
 function emptyReport(month: 1 | 2 | 3): MonthlyReportData {
   return {
     month,

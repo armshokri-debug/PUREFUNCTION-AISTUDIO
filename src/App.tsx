@@ -13,7 +13,12 @@ import { ReferralLanding } from './components/ReferralLanding';
 import { ReferralsPanel } from './components/coach/ReferralsPanel';
 import { refCodeFromUrl } from './cloud/referrals';
 import { deleteClientRemote } from './cloud/deleteClient';
-import { createClientProfile, findDuplicateClientByEmail } from './lib/clients';
+import {
+  canPermanentlyDeleteClient,
+  createClientProfile,
+  findDuplicateClientByEmail
+} from './lib/clients';
+import type { DeleteClientOutcome } from './components/coach/ClientDeleteModal';
 import {
   Users,
   BookOpen,
@@ -271,6 +276,7 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   };
 
   const showTestClientButton = canCreateTestClient();
+  const allowPermanentDelete = canPermanentlyDeleteClient();
 
   const handleAddClient = (newClientData: {
     name: string;
@@ -295,22 +301,37 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   const deleteClientRecord = async (
     id: string,
     opts: { isTestOnly?: boolean; confirmName?: string }
-  ): Promise<string | null> => {
+  ): Promise<DeleteClientOutcome> => {
     const target = clients.find((c) => c.id === id);
-    if (!target) return 'Client not found.';
-    if (opts.isTestOnly && !target.isTestClient) return 'Only test clients can be deleted here.';
+    if (!target) return { ok: false, error: 'Client not found.', retryable: false };
+    if (opts.isTestOnly && !target.isTestClient) {
+      return { ok: false, error: 'Only test clients can be deleted here.', retryable: false };
+    }
 
     if (profile && supabase) {
+      if (!target.isTestClient && !allowPermanentDelete) {
+        return {
+          ok: false,
+          error: 'Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead.',
+          retryable: false
+        };
+      }
       const flushed = await store.flush();
       if (!flushed) {
-        return 'Recent changes have not finished saving yet. Wait a moment and try again.';
+        return {
+          ok: false,
+          error: 'Recent changes have not finished saving yet. Wait a moment and try again.',
+          retryable: true
+        };
       }
-      const err = await deleteClientRemote({
+      const result = await deleteClientRemote({
         clientId: id,
         confirm: true,
         confirmName: target.isTestClient ? undefined : opts.confirmName
       });
-      if (err) return err;
+      if (!result.ok) {
+        return { ok: false, error: result.error, retryable: result.retryable };
+      }
       store.forgetClient(id);
       setJoinedIds((prev) => {
         if (!prev || !prev.has(id)) return prev;
@@ -326,7 +347,7 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
       setSelectedClientId('');
       setClientOpen(false);
     }
-    return null;
+    return { ok: true };
   };
 
   const handleDeleteTestClient = (id: string) => deleteClientRecord(id, { isTestOnly: true });
@@ -615,6 +636,7 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
                     onSelectClient={handleSelectClient}
                     onAddClient={handleAddClient}
                     showTestClientButton={showTestClientButton}
+                    permanentDeleteEnabled={allowPermanentDelete}
                     onCreateTestClient={showTestClientButton ? handleCreateTestClient : undefined}
                     onDeleteClient={handleDeleteClient}
                     onDeleteTestClient={handleDeleteTestClient}

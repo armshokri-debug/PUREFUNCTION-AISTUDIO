@@ -3,6 +3,30 @@ import { cors, json } from '../_shared/email-core.ts';
 export const CLIENT_STORAGE_BUCKETS = ['client-videos', 'inbody-printouts', 'message-media'] as const;
 export type ClientStorageBucket = (typeof CLIENT_STORAGE_BUCKETS)[number];
 
+export type DeletionJobStatus =
+  | 'pending'
+  | 'auth_disabled'
+  | 'db_deleted'
+  | 'auth_deleted'
+  | 'completed';
+
+export interface StorageManifestEntry {
+  bucket: ClientStorageBucket;
+  paths: string[];
+}
+
+export interface ClientDeletionJob {
+  clientId: string;
+  coachId: string;
+  clientName: string;
+  isTestClient: boolean;
+  status: DeletionJobStatus;
+  linkedAuthUserIds: string[];
+  storageManifest: StorageManifestEntry[];
+  attempts: number;
+  lastError?: string | null;
+}
+
 export interface DeleteClientRow {
   id: string;
   email: string | null;
@@ -19,16 +43,37 @@ export interface DeleteClientDeps {
   getUserByToken: (token: string) => Promise<{ id: string } | null>;
   getCoachProfile: (uid: string) => Promise<{ role?: string | null } | null>;
   getOwnedClient: (token: string, clientId: string) => Promise<DeleteClientRow | null>;
+  clientRowExists: (clientId: string) => Promise<{ exists: boolean; error: unknown }>;
   getLinkedProfiles: (clientId: string) => Promise<{ data: LinkedProfileRow[]; error: unknown }>;
   listClientStoragePaths: (
     bucket: ClientStorageBucket,
     clientId: string
   ) => Promise<{ paths: string[]; error: unknown }>;
-  deleteAuthUser: (uid: string) => Promise<{ error: unknown }>;
+  getDeletionJob: (clientId: string) => Promise<{ data: ClientDeletionJob | null; error: unknown }>;
+  createDeletionJob: (input: {
+    clientId: string;
+    coachId: string;
+    clientName: string;
+    isTestClient: boolean;
+    linkedAuthUserIds: string[];
+    storageManifest: StorageManifestEntry[];
+  }) => Promise<{ data: ClientDeletionJob | null; error: unknown }>;
+  updateDeletionJob: (
+    clientId: string,
+    patch: {
+      status: DeletionJobStatus;
+      lastError?: string | null;
+      incrementAttempts?: boolean;
+    }
+  ) => Promise<{ data: ClientDeletionJob | null; error: unknown }>;
+  /** Reversible lock/unlock of a client Auth account before DB deletion. */
+  setAuthUserBanned: (uid: string, banned: boolean) => Promise<{ error: unknown }>;
   deleteOwnedClientRow: (
     token: string,
     clientId: string
   ) => Promise<{ deleted: boolean; error: unknown }>;
+  /** Permanent Auth deletion — invoked ONLY after the client DB row is deleted. */
+  deleteAuthUser: (uid: string) => Promise<{ error: unknown }>;
   removeStoragePaths: (
     bucket: ClientStorageBucket,
     paths: string[]
@@ -46,6 +91,29 @@ function isSafeClientId(id: string): boolean {
   );
 }
 
+function countManifestFiles(manifest: StorageManifestEntry[]): number {
+  return manifest.reduce((sum, entry) => sum + entry.paths.length, 0);
+}
+
+function confirmNameMatches(expectedName: string, providedName: unknown): boolean {
+  const expected = expectedName.trim().toLowerCase();
+  const provided = String(providedName ?? '').trim().toLowerCase();
+  return expected.length > 0 && provided === expected;
+}
+
+/**
+ * Staged, trackable, idempotent permanent client deletion:
+ *   Preflight (auth + ownership + confirmation + coach-link protection + storage manifest)
+ *   -> Persist durable job (`pending`)
+ *   -> Stage 1: Reversible Auth lockout (`auth_disabled`)
+ *   -> Stage 2: Atomic DB cascade delete via caller JWT (`db_deleted`), with automatic
+ *               Auth unlock rollback if DB deletion fails
+ *   -> Stage 3: Permanent Auth account deletion (`auth_deleted`) — NEVER before DB delete
+ *   -> Stage 4: Stored media cleanup (`completed`)
+ *
+ * Every failure leaves durable job metadata intact so retrying resumes safely from the
+ * exact unfinished stage, and retrying a completed deletion returns 200 idempotently.
+ */
 export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed' });
@@ -78,79 +146,269 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
     return json(400, { error: 'Explicit coach confirmation is required before deleting a client.' });
   }
 
-  // Read via caller JWT so RLS verifies allowlisted, confirmed coach ownership.
-  const client = await deps.getOwnedClient(token, clientId);
-  if (!client || client.coach_id !== uid) {
-    return json(403, { error: 'Only the owning coach may delete this client.' });
-  }
-
-  const isTestClient = Boolean(client.data?.isTestClient);
-  const storedName = String(client.data?.name ?? '').trim();
-  if (!isTestClient) {
-    const providedName = String(body.confirmName ?? '').trim();
-    if (!storedName || providedName.toLowerCase() !== storedName.toLowerCase()) {
-      return json(400, { error: 'Type the client’s full name to confirm permanent deletion.' });
-    }
-  }
-
-  // Preflight 1: resolve all Auth accounts linked to this client before mutating anything.
-  const linked = await deps.getLinkedProfiles(client.id);
-  if (linked.error) {
-    return json(503, { error: 'Could not verify linked client accounts. No data was deleted.' });
-  }
-  const linkedProfiles = linked.data ?? [];
-  if (linkedProfiles.some((p) => p.role !== 'client' || p.id === uid)) {
-    return json(409, { error: 'Refused: this client record is linked to a coach account.' });
-  }
-
-  // Preflight 2: list client storage objects before mutating Auth or DB so errors fail closed.
-  const storagePlan: Array<{ bucket: ClientStorageBucket; paths: string[] }> = [];
-  for (const bucket of CLIENT_STORAGE_BUCKETS) {
-    const listed = await deps.listClientStoragePaths(bucket, client.id);
-    if (listed.error) {
-      return json(503, { error: 'Could not verify client media files. No data was deleted.' });
-    }
-    if (listed.paths.length > 0) {
-      storagePlan.push({ bucket, paths: listed.paths });
-    }
-  }
-
-  // Step 1: Delete linked client Auth user(s) first (cascades public.profiles & revokes sessions).
-  // If this fails, the client row and all training/media records remain completely intact.
-  const uniqueAuthIds = [...new Set(linkedProfiles.map((p) => p.id))];
-  for (const authUserId of uniqueAuthIds) {
-    const deletedAuth = await deps.deleteAuthUser(authUserId);
-    if (deletedAuth.error) {
-      return json(503, {
-        error: 'Could not remove the client’s sign-in account. Please retry.'
-      });
-    }
-  }
-
-  // Step 2: Delete the client row via caller's JWT (enforces RLS DELETE policy and
-  // atomically cascades workouts, messages, notes, food diary, posture, referrals, etc.).
-  const deletedRow = await deps.deleteOwnedClientRow(token, client.id);
-  if (deletedRow.error || !deletedRow.deleted) {
-    return json(500, {
-      error: 'Could not complete client deletion in the database. Please refresh and contact support if needed.'
+  // Check durable deletion tracking first (fail closed if tracking store is unavailable).
+  const existingJobRes = await deps.getDeletionJob(clientId);
+  if (existingJobRes.error) {
+    return json(503, {
+      error: 'Safe deletion tracking is not ready yet. No data was deleted; use Archive instead.',
+      retryable: false
     });
   }
 
-  // Step 3: Remove client-scoped storage objects across all client buckets.
-  for (const item of storagePlan) {
-    const removed = await deps.removeStoragePaths(item.bucket, item.paths);
-    if (removed.error) {
-      return json(502, {
-        error: 'Client profile was removed, but some stored media files could not be cleaned up. Refresh and contact support if needed.',
-        partialCleanup: true
+  let job = existingJobRes.data;
+
+  if (job) {
+    // Ownership & confirmation checks are enforced on every retry as well.
+    if (job.coachId !== uid) {
+      return json(403, { error: 'Only the owning coach may delete this client.' });
+    }
+    if (!job.isTestClient && !confirmNameMatches(job.clientName, body.confirmName)) {
+      return json(400, { error: 'Type the client’s full name to confirm permanent deletion.' });
+    }
+    if (job.status === 'completed') {
+      return json(200, {
+        ok: true,
+        status: 'completed',
+        alreadyCompleted: true,
+        deletedClientId: job.clientId,
+        deletedAuthUsers: job.linkedAuthUserIds.length,
+        deletedFiles: countManifestFiles(job.storageManifest)
       });
     }
+    const bumped = await deps.updateDeletionJob(job.clientId, {
+      status: job.status,
+      lastError: job.lastError ?? null,
+      incrementAttempts: true
+    });
+    if (bumped.error || !bumped.data) {
+      return json(503, {
+        error: 'Could not update deletion tracking state. Please retry.',
+        stage: job.status,
+        retryable: true
+      });
+    }
+    job = bumped.data;
+  } else {
+    // Fresh deletion: verify ownership through caller's JWT (RLS) before any preflight.
+    const client = await deps.getOwnedClient(token, clientId);
+    if (!client || client.coach_id !== uid) {
+      return json(403, { error: 'Only the owning coach may delete this client.' });
+    }
+
+    const isTestClient = Boolean(client.data?.isTestClient);
+    const storedName = String(client.data?.name ?? '').trim();
+    if (!isTestClient && !confirmNameMatches(storedName, body.confirmName)) {
+      return json(400, { error: 'Type the client’s full name to confirm permanent deletion.' });
+    }
+
+    // Preflight 1: resolve linked Auth accounts and refuse if any coach account is linked.
+    const linked = await deps.getLinkedProfiles(client.id);
+    if (linked.error) {
+      return json(503, {
+        error: 'Could not verify linked client accounts. No data was deleted.',
+        stage: 'preflight',
+        retryable: true
+      });
+    }
+    const linkedProfiles = linked.data ?? [];
+    if (linkedProfiles.some((p) => p.role !== 'client' || p.id === uid)) {
+      return json(409, { error: 'Refused: this client record is linked to a coach account.' });
+    }
+
+    // Preflight 2: snapshot storage manifest before any mutation.
+    const storageManifest: StorageManifestEntry[] = [];
+    for (const bucket of CLIENT_STORAGE_BUCKETS) {
+      const listed = await deps.listClientStoragePaths(bucket, client.id);
+      if (listed.error) {
+        return json(503, {
+          error: 'Could not verify client media files. No data was deleted.',
+          stage: 'preflight',
+          retryable: true
+        });
+      }
+      if (listed.paths.length > 0) {
+        storageManifest.push({ bucket, paths: listed.paths });
+      }
+    }
+
+    const uniqueAuthIds = [...new Set(linkedProfiles.map((p) => p.id))];
+    const created = await deps.createDeletionJob({
+      clientId: client.id,
+      coachId: uid,
+      clientName: storedName || client.id,
+      isTestClient,
+      linkedAuthUserIds: uniqueAuthIds,
+      storageManifest
+    });
+    if (created.error || !created.data) {
+      return json(503, {
+        error: 'Could not start a trackable deletion job. No data was deleted.',
+        stage: 'preflight',
+        retryable: true
+      });
+    }
+    job = created.data;
+    if (job.coachId !== uid) {
+      return json(403, { error: 'Only the owning coach may delete this client.' });
+    }
+  }
+
+  // Stage 1: Reversible Auth lockout (prevents concurrent client writes without destroying Auth yet).
+  if (job.status === 'pending') {
+    const lockedIds: string[] = [];
+    for (const authUserId of job.linkedAuthUserIds) {
+      const locked = await deps.setAuthUserBanned(authUserId, true);
+      if (locked.error) {
+        // Roll back any locks acquired earlier in this loop.
+        for (const prevId of lockedIds) {
+          await deps.setAuthUserBanned(prevId, false).catch(() => {});
+        }
+        await deps.updateDeletionJob(job.clientId, {
+          status: 'pending',
+          lastError: 'auth_disable_failed'
+        });
+        return json(503, {
+          error: 'Could not temporarily pause the client sign-in account. No data was deleted; you can retry safely.',
+          stage: 'auth_disable',
+          retryable: true
+        });
+      }
+      lockedIds.push(authUserId);
+    }
+
+    const advanced = await deps.updateDeletionJob(job.clientId, {
+      status: 'auth_disabled',
+      lastError: null
+    });
+    if (advanced.error || !advanced.data) {
+      for (const prevId of lockedIds) {
+        await deps.setAuthUserBanned(prevId, false).catch(() => {});
+      }
+      return json(503, {
+        error: 'Could not record deletion progress before removing data. No data was deleted; retry safely.',
+        stage: 'auth_disable',
+        retryable: true
+      });
+    }
+    job = advanced.data;
+  }
+
+  // Stage 2: Atomic DB cascade delete via caller's JWT (RLS-enforced).
+  // Auth is NOT permanently deleted yet; if DB deletion fails, Auth lock is reversed.
+  if (job.status === 'auth_disabled') {
+    const deletedRow = await deps.deleteOwnedClientRow(token, job.clientId);
+    let dbGone = !deletedRow.error && deletedRow.deleted;
+
+    if (!dbGone) {
+      // Handle crash recovery: a prior attempt may have deleted the DB row before persisting db_deleted.
+      const existsCheck = await deps.clientRowExists(job.clientId);
+      if (!existsCheck.error && !existsCheck.exists) {
+        dbGone = true;
+      }
+    }
+
+    if (!dbGone) {
+      let allRestored = true;
+      for (const authUserId of job.linkedAuthUserIds) {
+        const restored = await deps.setAuthUserBanned(authUserId, false);
+        if (restored.error) allRestored = false;
+      }
+      await deps.updateDeletionJob(job.clientId, {
+        status: allRestored ? 'pending' : 'auth_disabled',
+        lastError: 'db_delete_failed'
+      });
+      return json(503, {
+        error: allRestored
+          ? 'Could not delete the client record from the database. The client account was restored and nothing was permanently deleted. You can retry safely.'
+          : 'Could not delete the client record from the database. Retry to safely resume or restore.',
+        stage: 'db_delete',
+        retryable: true,
+        authRestored: allRestored
+      });
+    }
+
+    const advanced = await deps.updateDeletionJob(job.clientId, {
+      status: 'db_deleted',
+      lastError: null
+    });
+    if (advanced.error || !advanced.data) {
+      return json(503, {
+        error: 'Client data was deleted, but progress could not be recorded. Retry to complete Auth and file cleanup.',
+        stage: 'db_delete',
+        retryable: true
+      });
+    }
+    job = advanced.data;
+  }
+
+  // Stage 3: Permanent Auth deletion — strictly AFTER DB deletion succeeded.
+  if (job.status === 'db_deleted') {
+    for (const authUserId of job.linkedAuthUserIds) {
+      const deletedAuth = await deps.deleteAuthUser(authUserId);
+      if (deletedAuth.error) {
+        await deps.updateDeletionJob(job.clientId, {
+          status: 'db_deleted',
+          lastError: 'auth_delete_failed'
+        });
+        return json(503, {
+          error: 'Client records were removed and sign-in is locked, but deleting the sign-in account failed. Retry to finish cleanup safely.',
+          stage: 'auth_delete',
+          retryable: true
+        });
+      }
+    }
+
+    const advanced = await deps.updateDeletionJob(job.clientId, {
+      status: 'auth_deleted',
+      lastError: null
+    });
+    if (advanced.error || !advanced.data) {
+      return json(503, {
+        error: 'Client account was removed, but progress could not be recorded. Retry to finish media cleanup.',
+        stage: 'auth_delete',
+        retryable: true
+      });
+    }
+    job = advanced.data;
+  }
+
+  // Stage 4: Idempotent storage media cleanup.
+  if (job.status === 'auth_deleted') {
+    for (const entry of job.storageManifest) {
+      if (entry.paths.length === 0) continue;
+      const removed = await deps.removeStoragePaths(entry.bucket, entry.paths);
+      if (removed.error) {
+        await deps.updateDeletionJob(job.clientId, {
+          status: 'auth_deleted',
+          lastError: `storage_cleanup_failed:${entry.bucket}`
+        });
+        return json(503, {
+          error: 'Client records and account were removed, but media file cleanup did not finish. Retry to complete cleanup.',
+          stage: 'storage_cleanup',
+          retryable: true
+        });
+      }
+    }
+
+    const completed = await deps.updateDeletionJob(job.clientId, {
+      status: 'completed',
+      lastError: null
+    });
+    if (completed.error || !completed.data) {
+      return json(503, {
+        error: 'Cleanup succeeded, but finalizing the deletion record failed. Retry to confirm completion.',
+        stage: 'storage_cleanup',
+        retryable: true
+      });
+    }
+    job = completed.data;
   }
 
   return json(200, {
     ok: true,
-    deletedClientId: client.id,
-    deletedAuthUsers: uniqueAuthIds.length,
-    deletedFiles: storagePlan.reduce((sum, item) => sum + item.paths.length, 0)
+    status: 'completed',
+    deletedClientId: job.clientId,
+    deletedAuthUsers: job.linkedAuthUserIds.length,
+    deletedFiles: countManifestFiles(job.storageManifest)
   });
 }

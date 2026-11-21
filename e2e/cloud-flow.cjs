@@ -715,22 +715,32 @@ const today = iso(new Date());
   ok(!mock.db.clients.some((c) => c.email === 'alias.guard@googlemail.com'), 'clients safety: googlemail duplicate of gmail client is blocked');
   await C.getByRole('button', { name: 'Cancel', exact: true }).click();
 
-  // Seed a linked Auth account, workout, and storage file for Alias Guard, then delete via UI confirmation -> server delete-client
+  // Seed a linked Auth account and storage file for Alias Guard; verify Permanent Delete stays disabled by default and Archive keeps all data intact.
   const aliasAuthId = 'alias-auth-uid';
   mock.db.users.push({ id: aliasAuthId, email: 'alias.guard@gmail.com', password: 'Password123!', confirmed: true, meta: { display_name: 'Alias Guard' } });
   mock.db.profiles.push({ id: aliasAuthId, role: 'client', display_name: 'Alias Guard', client_id: aliasRow.id });
   mock.db.clientFiles[`${aliasRow.id}/clip.webm`] = { type: 'video/webm', body: Buffer.alloc(1) };
 
-  // Alias Guard is already selected in the detail panel; open its action menu and confirm deletion.
   await C.getByRole('button', { name: /More actions for Alias Guard/i }).click();
-  await C.getByRole('menuitem', { name: 'Delete Client', exact: true }).click();
-  await C.getByLabel(/confirm permanent deletion/i).fill('Alias Guard');
-  await C.locator('[role="dialog"]').getByRole('button', { name: 'Delete Client', exact: true }).click();
-  await C.locator('[role="dialog"]').waitFor({ state: 'hidden' });
-  ok(mock.log.some((entry) => entry.startsWith('POST /functions/v1/delete-client')), 'clients safety: cloud deletion uses server-side delete-client function');
-  ok(!mock.db.clients.some((c) => c.id === aliasRow.id), 'clients safety: client row removed by server delete-client');
-  ok(!mock.db.users.some((u) => u.id === aliasAuthId) && !mock.db.profiles.some((p) => p.id === aliasAuthId), 'clients safety: linked client Auth account and profile removed');
-  ok(!mock.db.clientFiles[`${aliasRow.id}/clip.webm`], 'clients safety: client storage files cleaned up');
+  const deleteMenuItem = C.getByRole('menuitem', { name: /Delete Client/i });
+  ok(await deleteMenuItem.isDisabled(), 'clients safety: Permanent Delete is disabled by default until safe server cleanup is enabled');
+
+  // Archive works without deleting DB record, Auth account, or storage files
+  await C.getByRole('menuitem', { name: 'Archive', exact: true }).click();
+  await C.waitForTimeout(1000);
+  const archivedAlias = mock.db.clients.find((c) => c.id === aliasRow.id);
+  ok(Boolean(archivedAlias && archivedAlias.data.archived === true), 'clients safety: Archive marks client archived without deleting row');
+  ok(mock.db.users.some((u) => u.id === aliasAuthId) && mock.db.profiles.some((p) => p.id === aliasAuthId), 'clients safety: Archive preserves linked Auth account and profile');
+  ok(Boolean(mock.db.clientFiles[`${aliasRow.id}/clip.webm`]), 'clients safety: Archive preserves client storage files');
+  ok(!mock.log.some((entry) => entry.startsWith('POST /functions/v1/delete-client')), 'clients safety: Archive never invokes delete-client');
+
+  // Archived client can be viewed in Archived filter and restored cleanly
+  await C.getByRole('tab', { name: /^Archived/ }).click();
+  await C.locator('main').getByText('Alias Guard', { exact: true }).first().waitFor();
+  await C.getByRole('button', { name: 'Restore Client', exact: true }).click();
+  await C.waitForTimeout(1000);
+  const restoredAlias = mock.db.clients.find((c) => c.id === aliasRow.id);
+  ok(Boolean(restoredAlias && !restoredAlias.data.archived), 'clients safety: Restore returns archived client to active list intact');
 
   // A stale coach editor must fail closed instead of replacing newer results.
   await goToClientsList();

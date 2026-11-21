@@ -1,6 +1,7 @@
-// Coach-only: safely delete an owned client, its dependent data, media files, and linked Auth user (verify_jwt = true).
+// Coach-only: staged, trackable, idempotent deletion of an owned client (verify_jwt = true).
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.49.4';
 import {
+  type ClientDeletionJob,
   type ClientStorageBucket,
   handleDeleteClient
 } from './handler.ts';
@@ -48,7 +49,6 @@ async function listBucketPrefix(
     const items = data ?? [];
     for (const item of items) {
       const fullPath = `${prefix}/${item.name}`;
-      // Supabase storage folders have id === null; files have a non-null id or metadata.
       if (item.id === null && !item.metadata) {
         const nested = await listBucketPrefix(admin, bucket, fullPath, depth + 1);
         if (nested.error) return nested;
@@ -99,6 +99,14 @@ Deno.serve(async (req) => {
         .maybeSingle();
       return error ? null : data;
     },
+    clientRowExists: async (clientId) => {
+      const { data, error } = await admin
+        .from('clients')
+        .select('id')
+        .eq('id', clientId)
+        .maybeSingle();
+      return { exists: Boolean(data?.id), error };
+    },
     getLinkedProfiles: async (clientId) => {
       const { data, error } = await admin
         .from('profiles')
@@ -107,12 +115,36 @@ Deno.serve(async (req) => {
       return { data: (data ?? []) as Array<{ id: string; role: string | null }>, error };
     },
     listClientStoragePaths: (bucket, clientId) => listBucketPrefix(admin, bucket, clientId),
-    deleteAuthUser: async (uid) => {
-      const { error } = await admin.auth.admin.deleteUser(uid);
+    getDeletionJob: async (clientId) => {
+      const { data, error } = await admin.rpc('pf_deletion_job_get', { p_client_id: clientId });
+      return { data: (data as ClientDeletionJob | null) ?? null, error };
+    },
+    createDeletionJob: async (input) => {
+      const { data, error } = await admin.rpc('pf_deletion_job_create', {
+        p_client_id: input.clientId,
+        p_coach_id: input.coachId,
+        p_client_name: input.clientName,
+        p_is_test_client: input.isTestClient,
+        p_linked_auth_user_ids: input.linkedAuthUserIds,
+        p_storage_manifest: input.storageManifest
+      });
+      return { data: (data as ClientDeletionJob | null) ?? null, error };
+    },
+    updateDeletionJob: async (clientId, patch) => {
+      const { data, error } = await admin.rpc('pf_deletion_job_advance', {
+        p_client_id: clientId,
+        p_status: patch.status,
+        p_last_error: patch.lastError ?? null,
+        p_increment_attempts: Boolean(patch.incrementAttempts)
+      });
+      return { data: (data as ClientDeletionJob | null) ?? null, error };
+    },
+    setAuthUserBanned: async (uid, banned) => {
+      const { error } = await admin.auth.admin.updateUserById(uid, {
+        ban_duration: banned ? '876000h' : 'none'
+      });
       if (error && isUserNotFound(error)) {
-        // Clean up any stale profile row if the Auth record was already deleted earlier.
-        const cleanup = await admin.from('profiles').delete().eq('id', uid).eq('role', 'client');
-        return { error: cleanup.error };
+        return { error: null };
       }
       return { error };
     },
@@ -124,6 +156,15 @@ Deno.serve(async (req) => {
         .eq('id', clientId)
         .select('id');
       return { deleted: !error && Array.isArray(data) && data.length === 1, error };
+    },
+    deleteAuthUser: async (uid) => {
+      const { error } = await admin.auth.admin.deleteUser(uid);
+      if (error && isUserNotFound(error)) {
+        // Idempotent cleanup if the Auth user was already deleted in a prior attempt.
+        const cleanup = await admin.from('profiles').delete().eq('id', uid).eq('role', 'client');
+        return { error: cleanup.error };
+      }
+      return { error };
     },
     removeStoragePaths: async (bucket, paths) => {
       for (let i = 0; i < paths.length; i += 100) {

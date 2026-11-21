@@ -7,7 +7,7 @@
 const crypto = require('crypto');
 
 module.exports = function createMock({ coachEmail = 'coach@example.com', otherCoachEmail = 'othercoach@example.com' } = {}) {
-  const db = { users: [], profiles: [], clients: [], workouts: [], exercises: [], files: {}, clientFiles: {}, emails: [], resetTokens: {}, verificationTokens: {}, inviteTokens: {}, coach_messages: [], coach_notes_secure: [], food_entries: [], food_items: [], posture_public_reports: [], program_templates: [] };
+  const db = { users: [], profiles: [], clients: [], workouts: [], exercises: [], files: {}, clientFiles: {}, emails: [], resetTokens: {}, verificationTokens: {}, inviteTokens: {}, coach_messages: [], coach_notes_secure: [], food_entries: [], food_items: [], posture_public_reports: [], program_templates: [], deletionJobs: {} };
   const log = [];
   const realtimeLog = [];
   const cors = {
@@ -152,35 +152,72 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       if (!clientId || b.confirm !== true) {
         return json(route, 400, { error: 'Explicit coach confirmation is required before deleting a client.' });
       }
-      const c = db.clients.find((row) => row.id === clientId);
-      if (!c || c.coach_id !== prof.id) {
-        return json(route, 403, { error: 'Only the owning coach may delete this client.' });
-      }
-      const isTest = Boolean(c.data && c.data.isTestClient);
-      const storedName = String((c.data && c.data.name) || '').trim();
-      if (!isTest) {
-        if (!storedName || String(b.confirmName || '').trim().toLowerCase() !== storedName.toLowerCase()) {
+      let job = db.deletionJobs[clientId];
+      if (job) {
+        if (job.coachId !== prof.id) return json(route, 403, { error: 'Only the owning coach may delete this client.' });
+        if (!job.isTestClient && String(b.confirmName || '').trim().toLowerCase() !== job.clientName.toLowerCase()) {
           return json(route, 400, { error: 'Type the client’s full name to confirm permanent deletion.' });
         }
+        if (job.status === 'completed') {
+          return json(route, 200, { ok: true, status: 'completed', alreadyCompleted: true, deletedClientId: clientId, deletedAuthUsers: job.linkedAuthUserIds.length, deletedFiles: job.filePaths.length });
+        }
+        job.attempts += 1;
+      } else {
+        const c = db.clients.find((row) => row.id === clientId);
+        if (!c || c.coach_id !== prof.id) {
+          return json(route, 403, { error: 'Only the owning coach may delete this client.' });
+        }
+        const isTest = Boolean(c.data && c.data.isTestClient);
+        const storedName = String((c.data && c.data.name) || '').trim();
+        if (!isTest && (!storedName || String(b.confirmName || '').trim().toLowerCase() !== storedName.toLowerCase())) {
+          return json(route, 400, { error: 'Type the client’s full name to confirm permanent deletion.' });
+        }
+        const linked = db.profiles.filter((p) => p.client_id === clientId);
+        if (linked.some((p) => p.role !== 'client' || p.id === prof.id)) {
+          return json(route, 409, { error: 'Refused: this client record is linked to a coach account.' });
+        }
+        job = {
+          clientId,
+          coachId: prof.id,
+          clientName: storedName || clientId,
+          isTestClient: isTest,
+          status: 'pending',
+          linkedAuthUserIds: [...new Set(linked.map((p) => p.id))],
+          filePaths: Object.keys(db.clientFiles).filter((k) => k.startsWith(clientId + '/')),
+          attempts: 1
+        };
+        db.deletionJobs[clientId] = job;
       }
-      const linked = db.profiles.filter((p) => p.client_id === clientId);
-      if (linked.some((p) => p.role !== 'client' || p.id === prof.id)) {
-        return json(route, 409, { error: 'Refused: this client record is linked to a coach account.' });
+
+      // Stage 1: reversible auth lock
+      if (job.status === 'pending') {
+        db.users.forEach((u) => { if (job.linkedAuthUserIds.includes(u.id)) u.banned = true; });
+        job.status = 'auth_disabled';
       }
-      const linkedIds = new Set(linked.map((p) => p.id));
-      db.users = db.users.filter((u) => !linkedIds.has(u.id));
-      db.profiles = db.profiles.filter((p) => !linkedIds.has(p.id) && p.client_id !== clientId);
-      db.clients = db.clients.filter((row) => row.id !== clientId);
-      db.workouts = db.workouts.filter((row) => row.client_id !== clientId);
-      db.coach_messages = db.coach_messages.filter((row) => row.client_id !== clientId);
-      db.coach_notes_secure = db.coach_notes_secure.filter((row) => row.client_id !== clientId);
-      db.food_entries = db.food_entries.filter((row) => row.client_id !== clientId);
-      db.food_items = db.food_items.filter((row) => row.client_id !== clientId);
-      db.posture_public_reports = db.posture_public_reports.filter((row) => row.client_id !== clientId);
-      Object.keys(db.clientFiles).forEach((k) => {
-        if (k.startsWith(clientId + '/')) delete db.clientFiles[k];
-      });
-      return json(route, 200, { ok: true, deletedClientId: clientId, deletedAuthUsers: linkedIds.size, deletedFiles: 0 });
+      // Stage 2: DB delete first (before permanent Auth delete)
+      if (job.status === 'auth_disabled') {
+        db.clients = db.clients.filter((row) => row.id !== clientId);
+        db.workouts = db.workouts.filter((row) => row.client_id !== clientId);
+        db.coach_messages = db.coach_messages.filter((row) => row.client_id !== clientId);
+        db.coach_notes_secure = db.coach_notes_secure.filter((row) => row.client_id !== clientId);
+        db.food_entries = db.food_entries.filter((row) => row.client_id !== clientId);
+        db.food_items = db.food_items.filter((row) => row.client_id !== clientId);
+        db.posture_public_reports = db.posture_public_reports.filter((row) => row.client_id !== clientId);
+        job.status = 'db_deleted';
+      }
+      // Stage 3: permanent Auth delete only after DB delete
+      if (job.status === 'db_deleted') {
+        const linkedIds = new Set(job.linkedAuthUserIds);
+        db.users = db.users.filter((u) => !linkedIds.has(u.id));
+        db.profiles = db.profiles.filter((p) => !linkedIds.has(p.id) && p.client_id !== clientId);
+        job.status = 'auth_deleted';
+      }
+      // Stage 4: storage cleanup
+      if (job.status === 'auth_deleted') {
+        job.filePaths.forEach((k) => { delete db.clientFiles[k]; });
+        job.status = 'completed';
+      }
+      return json(route, 200, { ok: true, status: 'completed', deletedClientId: clientId, deletedAuthUsers: job.linkedAuthUserIds.length, deletedFiles: job.filePaths.length });
     }
 
     // ---------------- Auth ----------------
