@@ -5,7 +5,7 @@ import { PostureReports } from './components/PostureReports';
 import { supabase } from './cloud/supabase';
 import { ProfilePhotoButton } from './components/client/ProfilePhotoButton';
 import { useSession, Profile } from './cloud/Session';
-import { AuthScreen, LoadingScreen, NewPasswordScreen, ResetCompleteScreen, NoAccessScreen } from './cloud/AuthScreen';
+import { AuthScreen, AcceptInviteScreen, LoadingScreen, NewPasswordScreen, ResetCompleteScreen, NoAccessScreen } from './cloud/AuthScreen';
 import { ClientsStore, SyncState, useCloudClientsStore, useLocalClientsStore } from './cloud/useClientsStore';
 import { ExerciseLibraryProvider } from './state/ExerciseLibrary';
 import { ReferView } from './components/client/ReferView';
@@ -83,6 +83,7 @@ export default function App() {
   if (status === 'loading') return <LoadingScreen />;
   if (status === 'signed-out') return <SignedOut />;
   if (status === 'no-access') return <NoAccessScreen />;
+  if (status === 'invite') return <AcceptInviteScreen />;
   if (status === 'reset') return <NewPasswordScreen />;
   if (status === 'reset-complete') return <ResetCompleteScreen />;
   return <CloudApp key={profile!.id} profile={profile!} />;
@@ -228,22 +229,20 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   const canPreviewClient = !profile && !!selectedClient;
   const unreadCount = useUnreadCount(role, role === 'client' ? selectedClient?.id ?? null : null);
 
-  // Cloud: which clients have created their account (for "Not joined · Invite").
+  // A pending/unconfirmed Auth profile is not a Joined client.
   const [joinedIds, setJoinedIds] = useState<Set<string> | undefined>(undefined);
   useEffect(() => {
     if (!supabase || profile?.role !== 'coach' || coachTab !== 'clients') return;
     let cancelled = false;
-    supabase
-      .from('profiles')
-      .select('client_id')
-      .eq('role', 'client')
-      .then(({ data }) => {
-        if (!cancelled && data) setJoinedIds(new Set(data.map((r: { client_id: string }) => r.client_id)));
-      });
-    return () => {
-      cancelled = true;
+    const load = async () => {
+      const { data, error } = await supabase!.rpc('pf_confirmed_client_ids');
+      if (cancelled) return;
+      setJoinedIds(error || !data ? undefined : new Set(data.map((r: { client_id: string }) => r.client_id)));
     };
-  }, [profile, coachTab, clients.length]);
+    void load();
+    const id = window.setInterval(() => void load(), 20_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [profile?.role, profile?.id, coachTab, clients.length]);
 
   // Signed in: drop the invite parameter from the address bar.
   useEffect(() => {
