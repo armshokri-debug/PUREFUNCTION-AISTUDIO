@@ -15,6 +15,27 @@ Deno.serve(async (req) => {
     appUrl: APP_URL,
     cooldown: inviteCooldown,
     sendEmail: sendTransactionalEmail,
+    getInviteAccountState: async (email) => {
+      const { data, error } = await admin.rpc('pf_invite_account_state', { p_email: email });
+      if (error || !['absent', 'pending', 'confirmed'].includes(data)) {
+        throw new Error('Invite account lookup unavailable');
+      }
+      return data as 'absent' | 'pending' | 'confirmed';
+    },
+    generateInviteLink: async (email, displayName) => {
+      const { data, error } = await admin.auth.admin.generateLink({
+        type: 'invite', email, options: { data: { display_name: displayName } }
+      });
+      return { hashedToken: data.properties?.hashed_token, userId: data.user?.id, error };
+    },
+    generateExistingLink: async (email) => {
+      const { data, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
+      return { hashedToken: data.properties?.hashed_token, error };
+    },
+    deleteNewInviteUser: async (userId) => {
+      const { error } = await admin.auth.admin.deleteUser(userId);
+      if (error) throw error;
+    },
     getUserByToken: async (token) => {
       const { data } = await admin.auth.getUser(token);
       return data.user ? { id: data.user.id } : null;
