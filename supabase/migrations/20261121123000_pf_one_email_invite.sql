@@ -32,7 +32,7 @@ as $$
       where own.id = (select auth.uid()) and own.role = 'coach'
     )
     and u.email_confirmed_at is not null
-    and pg_catalog.length(pg_catalog.coalesce(u.encrypted_password, '')) > 0;
+    and pg_catalog.length(coalesce(u.encrypted_password, '')) > 0;
 $$;
 revoke execute on function public.pf_joined_client_ids() from public, anon;
 grant execute on function public.pf_joined_client_ids() to authenticated;
