@@ -7,7 +7,8 @@ as $$
   select pg_catalog.jsonb_build_object(
     'email', u.email,
     'confirmed', u.email_confirmed_at is not null,
-    'hasPassword', length(coalesce(u.encrypted_password, '')) > 0
+    'hasPassword', length(coalesce(u.encrypted_password, '')) > 0,
+    'clientId', (select p.client_id from public.profiles p where p.id = u.id and p.role = 'client' limit 1)
   )
   from auth.users u
   where pg_catalog.lower(u.email) = pg_catalog.lower(pg_catalog.btrim(p_email))
@@ -28,10 +29,7 @@ as $$
   join public.profiles p on p.client_id = c.id and p.role = 'client'
   join auth.users u on u.id = p.id
   where c.coach_id = (select auth.uid())
-    and exists (
-      select 1 from public.profiles own
-      where own.id = (select auth.uid()) and own.role = 'coach'
-    )
+    and private.basic_is_coach()
     and u.email_confirmed_at is not null
     and pg_catalog.length(coalesce(u.encrypted_password, '')) > 0;
 $$;
