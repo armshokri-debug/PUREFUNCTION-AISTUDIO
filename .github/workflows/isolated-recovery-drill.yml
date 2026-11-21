@@ -143,10 +143,12 @@ jobs:
           SQL
           for name in auth-full public-private-full storage-schema-full supabase-migrations; do
             restore_flags=()
-            if [[ "$name" == 'auth-full' || "$name" == 'storage-schema-full' ]]; then
-              schema='auth'
-              [[ "$name" == 'storage-schema-full' ]] && schema='storage'
-              existing="$(psql "$LOCAL_RESTORE_DB_URL" -X -tA -c "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='$schema';")"
+            if [[ "$name" == 'auth-full' ]]; then
+              # Restore the schema itself: Supabase's postgres image does not bootstrap
+              # the full GoTrue auth schema, so data-only cannot reconstruct it.
+              restore_flags+=(--clean --if-exists)
+            elif [[ "$name" == 'storage-schema-full' ]]; then
+              existing="$(psql "$LOCAL_RESTORE_DB_URL" -X -tA -c "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='storage';")"
               if [[ "$existing" -gt 0 ]]; then
                 restore_flags+=(--data-only --disable-triggers)
               fi
