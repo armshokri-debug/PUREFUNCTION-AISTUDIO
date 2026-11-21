@@ -142,48 +142,45 @@ jobs:
             END LOOP;
           END $$;
           SQL
-          for name in auth-full public-private-full storage-schema-full supabase-migrations; do
-            restore_flags=()
-            if [[ "$name" == 'auth-full' ]]; then
-              # Restore the schema itself: Supabase's postgres image does not bootstrap
-              # the full GoTrue auth schema, so data-only cannot reconstruct it.
-              restore_flags+=(--clean --if-exists)
-            elif [[ "$name" == 'storage-schema-full' ]]; then
-              existing="$(psql "$LOCAL_RESTORE_DB_URL" -X -tA -c "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='storage';")"
-              if [[ "$existing" -gt 0 ]]; then
-                restore_flags+=(--data-only --disable-triggers)
-              fi
+          restore_phase() {
+            local name="$1" section="$2"
+            local archive="$RUNNER_TEMP/pf-isolated-restore/db/$name.dump"
+            local flags=(--no-owner --no-acl --exit-on-error --single-transaction "--section=$section")
+            if [[ "$section" == "pre-data" ]]; then
+              flags+=(--clean --if-exists)
             fi
-            if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" --no-owner --no-acl --exit-on-error --single-transaction "${restore_flags[@]}" "$RUNNER_TEMP/pf-isolated-restore/db/$name.dump" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
-              echo "PASS: $name restored into ephemeral PostgreSQL 17"
+            if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" "\${flags[@]}" "$archive" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
+              echo "PASS: $name $section restored into isolated PostgreSQL 17"
+              return 0
+            fi
+            if grep -qi 'role .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+              echo "BLOCKED: $name $section missing local role"
+            elif grep -qi 'schema .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+              echo "BLOCKED: $name $section missing local schema"
+            elif grep -qi 'function .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+              echo "BLOCKED: $name $section missing local function"
+            elif grep -qi 'relation .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
+              echo "BLOCKED: $name $section missing local table"
+            elif grep -qi 'already exists' "$RUNNER_TEMP/restore-error.txt"; then
+              echo "BLOCKED: $name $section local schema conflict"
+            elif grep -qi 'extension .* is not available' "$RUNNER_TEMP/restore-error.txt"; then
+              echo "BLOCKED: $name $section missing extension"
             else
-              if grep -qi 'role .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing local role"
-              elif grep -qi 'extension .* is not available' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing local extension"
-              elif grep -qi 'function .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing local function dependency"
-              elif grep -qi 'schema .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing local schema"
-                python3 -c 'import re,sys; d=open(sys.argv[1],errors="replace").read(); m=re.search(r"schema [\x22\x27]?([a-z_][a-z0-9_]{0,63})[\x22\x27]? does not exist",d,re.I); print("Missing standard database schema: "+m.group(1) if m else "Unknown missing schema")' "$RUNNER_TEMP/restore-error.txt"
-              elif grep -qi 'type .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing PostgreSQL type"
-              elif grep -qi 'relation .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing local relation"
-              elif grep -qi 'already exists' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, conflicting local object"
-              elif grep -qi 'unrecognized configuration parameter' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing PostgreSQL setting"
-              elif grep -qi 'permission denied\|must be owner\|must be superuser' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, local database permission"
-              elif grep -qi 'could not open extension control file' "$RUNNER_TEMP/restore-error.txt"; then
-                echo "BLOCKED: $name, missing extension control"
-              else
-                echo "BLOCKED: $name, unexpected isolated restore error"
-                python3 -c 'import re,sys; s=open(sys.argv[1],errors="replace").read(); m=re.search(r"(?im)^(?:pg_restore: error:|ERROR:)\s*([^\n]+)",s); t=m.group(1) if m else "unknown"; t=re.sub(r"[\x22\x27][^\x22\x27]*[\x22\x27]|https?://\S+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+","[redacted]",t); print("Safe restore error category: "+t[:90])' "$RUNNER_TEMP/restore-error.txt"
-              fi
-              exit 1
+              echo "BLOCKED: $name $section isolated restore dependency error"
             fi
+            return 1
+          }
+          restore_phase auth-full pre-data
+          restore_phase public-private-full pre-data
+          restore_phase storage-schema-full pre-data
+          restore_phase auth-full data
+          restore_phase public-private-full data
+          restore_phase storage-schema-full data
+          restore_phase auth-full post-data
+          restore_phase public-private-full post-data
+          restore_phase storage-schema-full post-data
+          for section in pre-data data post-data; do
+            restore_phase supabase-migrations "$section"
           done
           test "$(psql "$LOCAL_RESTORE_DB_URL" -X -tA -c "SELECT count(*)>0 FROM pg_catalog.pg_tables WHERE schemaname IN ('auth','storage','private');")" = t
           echo 'PASS: Full isolated database restore validated'
