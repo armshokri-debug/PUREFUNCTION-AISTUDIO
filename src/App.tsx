@@ -5,7 +5,7 @@ import { PostureReports } from './components/PostureReports';
 import { supabase } from './cloud/supabase';
 import { ProfilePhotoButton } from './components/client/ProfilePhotoButton';
 import { useSession, Profile } from './cloud/Session';
-import { AuthScreen, LoadingScreen, NewPasswordScreen, ResetCompleteScreen, NoAccessScreen } from './cloud/AuthScreen';
+import { AuthScreen, LoadingScreen, NewPasswordScreen, ResetCompleteScreen, NoAccessScreen, AcceptInvitationScreen } from './cloud/AuthScreen';
 import { ClientsStore, SyncState, useCloudClientsStore, useLocalClientsStore } from './cloud/useClientsStore';
 import { ExerciseLibraryProvider } from './state/ExerciseLibrary';
 import { ReferView } from './components/client/ReferView';
@@ -83,6 +83,7 @@ export default function App() {
   if (status === 'loading') return <LoadingScreen />;
   if (status === 'signed-out') return <SignedOut />;
   if (status === 'no-access') return <NoAccessScreen />;
+  if (status === 'invite') return <AcceptInvitationScreen />;
   if (status === 'reset') return <NewPasswordScreen />;
   if (status === 'reset-complete') return <ResetCompleteScreen />;
   return <CloudApp key={profile!.id} profile={profile!} />;
@@ -234,11 +235,9 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
     if (!supabase || profile?.role !== 'coach' || coachTab !== 'clients') return;
     let cancelled = false;
     supabase
-      .from('profiles')
-      .select('client_id')
-      .eq('role', 'client')
-      .then(({ data }) => {
-        if (!cancelled && data) setJoinedIds(new Set(data.map((r: { client_id: string }) => r.client_id)));
+      .rpc('pf_joined_client_ids')
+      .then(({ data, error }) => {
+        if (!cancelled && !error && data) setJoinedIds(new Set(data as string[]));
       });
     return () => {
       cancelled = true;
