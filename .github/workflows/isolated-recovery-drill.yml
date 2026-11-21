@@ -20,12 +20,14 @@ jobs:
         image: supabase/postgres:17.12.0.002
         env:
           POSTGRES_DB: restorecheck
-          POSTGRES_USER: postgres
+          POSTGRES_USER: supabase_admin
           POSTGRES_PASSWORD: local-restore-only
+          PGPASSWORD: local-restore-only
+          PGUSER: supabase_admin
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d restorecheck"
+          --health-cmd "pg_isready -U supabase_admin -d restorecheck"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -140,7 +142,16 @@ jobs:
           END $$;
           SQL
           for name in auth-full public-private-full storage-schema-full supabase-migrations; do
-            if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" --no-owner --no-acl --exit-on-error --single-transaction "$RUNNER_TEMP/pf-isolated-restore/db/$name.dump" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
+            restore_flags=()
+            if [[ "$name" == 'auth-full' || "$name" == 'storage-schema-full' ]]; then
+              schema='auth'
+              [[ "$name" == 'storage-schema-full' ]] && schema='storage'
+              existing="$(psql "$LOCAL_RESTORE_DB_URL" -X -tA -c "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='$schema';")"
+              if [[ "$existing" -gt 0 ]]; then
+                restore_flags+=(--data-only --disable-triggers)
+              fi
+            fi
+            if /usr/lib/postgresql/18/bin/pg_restore --dbname="$LOCAL_RESTORE_DB_URL" --no-owner --no-acl --exit-on-error --single-transaction "${restore_flags[@]}" "$RUNNER_TEMP/pf-isolated-restore/db/$name.dump" >/dev/null 2>"$RUNNER_TEMP/restore-error.txt"; then
               echo "PASS: $name restored into ephemeral PostgreSQL 17"
             else
               if grep -qi 'role .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
