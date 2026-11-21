@@ -232,6 +232,64 @@ export const AuthScreen: React.FC = () => {
   );
 };
 
+/** The invitation email already proved ownership. One password form, then dashboard. */
+export const AcceptInviteScreen: React.FC = () => {
+  const { setInvitePassword, signOut } = useSession();
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setError(null);
+    if (password.length < 8 || password.length > 72) {
+      setError('Password must be 8 to 72 characters.');
+      return;
+    }
+    if (password !== confirmation) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    const err = await setInvitePassword(password);
+    setBusy(false);
+    if (err) setError(err);
+  };
+
+  return (
+    <Shell>
+      <h1 className="text-2xl font-bold tracking-tight text-[#111827] mb-1">Welcome to Pure Function</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        Invitation accepted. Choose a password to open your training. You won’t need another verification email.
+      </p>
+      <form onSubmit={(e) => void save(e)} className="space-y-3">
+        <input
+          type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          placeholder="Create password (8–72 characters)" aria-label="Create password"
+          autoComplete="new-password" required minLength={8} maxLength={72}
+          disabled={busy} className={input}
+        />
+        <input
+          type="password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)}
+          placeholder="Confirm password" aria-label="Confirm password"
+          autoComplete="new-password" required minLength={8} maxLength={72}
+          disabled={busy} className={input}
+        />
+        {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+        <button type="submit" disabled={busy}
+          className="w-full flex items-center justify-center gap-2 bg-[#111827] text-white text-base font-semibold py-3.5 rounded-xl disabled:opacity-60">
+          {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+          Activate account
+        </button>
+      </form>
+      <button type="button" disabled={busy} onClick={() => void signOut()}
+        className="w-full text-sm text-gray-500 py-3">Cancel</button>
+    </Shell>
+  );
+};
+
 /** A recovery link authorizes a temporary Supabase session; it is NOT a login. */
 export const NewPasswordScreen: React.FC = () => {
   const { setNewPassword, signOut } = useSession();
