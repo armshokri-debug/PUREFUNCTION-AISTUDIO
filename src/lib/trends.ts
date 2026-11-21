@@ -1,6 +1,6 @@
 import { ClientProfile } from '../types';
 import { measuresOf } from './assessments';
-import { estimated1RM, parseISODate } from './workouts';
+import { estimated1RM } from './workouts';
 
 export interface Point {
   date: string;
@@ -8,7 +8,9 @@ export interface Point {
 }
 
 const DAY = 86400000;
-const daysBetween = (a: string, b: string) => (parseISODate(b).getTime() - parseISODate(a).getTime()) / DAY;
+// Compare calendar dates in UTC so daylight saving cannot shift the weekly rate.
+const daysBetween = (a: string, b: string) =>
+  (Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / DAY;
 
 export interface Trend {
   /** change per week (least-squares slope) */
