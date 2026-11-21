@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:17
+        image: supabase/postgres:17.12.0.002
         env:
           POSTGRES_DB: restorecheck
           POSTGRES_USER: postgres
@@ -151,6 +151,7 @@ jobs:
                 echo "BLOCKED: $name, missing local function dependency"
               elif grep -qi 'schema .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
                 echo "BLOCKED: $name, missing local schema"
+                python3 -c 'import re,sys; d=open(sys.argv[1],errors="replace").read(); m=re.search(r"schema [\x22\x27]?([a-z_][a-z0-9_]{0,63})[\x22\x27]? does not exist",d,re.I); print("Missing standard database schema: "+m.group(1) if m else "Unknown missing schema")' "$RUNNER_TEMP/restore-error.txt"
               elif grep -qi 'type .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
                 echo "BLOCKED: $name, missing PostgreSQL type"
               elif grep -qi 'relation .* does not exist' "$RUNNER_TEMP/restore-error.txt"; then
