@@ -234,13 +234,18 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   useEffect(() => {
     if (!supabase || profile?.role !== 'coach' || coachTab !== 'clients') return;
     let cancelled = false;
-    supabase
-      .rpc('pf_joined_client_ids')
-      .then(({ data, error }) => {
-        if (!cancelled && !error && data) setJoinedIds(new Set(data as string[]));
-      });
+    const fetchJoined = async () => {
+      if (document.visibilityState === 'hidden') return;
+      const { data, error } = await supabase!.rpc('pf_joined_client_ids');
+      if (!cancelled && !error && data) setJoinedIds(new Set(data as string[]));
+    };
+    void fetchJoined();
+    window.addEventListener('focus', fetchJoined);
+    const interval = window.setInterval(() => void fetchJoined(), 30_000);
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', fetchJoined);
+      window.clearInterval(interval);
     };
   }, [profile, coachTab, clients.length]);
 
