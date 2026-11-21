@@ -14,6 +14,7 @@ export interface ExistingInviteAccount {
   email: string;
   confirmed: boolean;
   hasPassword: boolean;
+  clientId: string | null;
 }
 
 /** The one email is the ownership proof; no second sign-up verification is required. */
@@ -77,6 +78,11 @@ export async function handleSendInvite(req: Request, deps: SendInviteDeps): Prom
   if (!existing.data && alias) {
     existing = await deps.getExistingAccount(alias);
     if (existing.error) return json(503, { error: 'Could not check this invitation. Try again.' });
+  }
+  if (existing.data && existing.data.clientId !== client.id) {
+    // Even the Gmail/googlemail spelling of another linked account must
+    // never be re-used to activate an unrelated client profile.
+    return json(409, { error: 'This address is linked to a different client record. Review duplicate client emails before inviting.' });
   }
   if (existing.data?.confirmed && existing.data.hasPassword) {
     return json(409, {
