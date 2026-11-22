@@ -39,6 +39,8 @@ After every test, QA counts were: 3 preexisting Auth users, 1 preexisting client
 
 On **2026-11-22**, [GitHub Actions run 44988680112](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44988680112), live `run-encrypted-backup` job **SUCCESS**. The log explicitly confirms AES-256-GCM encryption with immediate decryption verification and encrypted archive upload to private Google Drive (`210123` bytes, 1 Storage file, 0 pruned files). `ENABLE_SUPABASE_BACKUP=true` was recorded by this workflow, and the `03:17 UTC` daily schedule is now present in `.github/workflows/supabase-backup.yml`.
 
+**Independent Drive integrity proof:** Retrieved the exact 2026-11-22 encrypted archive (210,123 bytes) and its separate JSON manifest directly from the backup Google Drive folder using the connected Drive account. Local SHA-256 of the downloaded encrypted archive **matched** `encryptedArchiveSha256` in the manifest; the archive has expected `PFBK1` header. Manifest inventories 5 DB components, 4 buckets and 1 stored object. Both temporary downloads were deleted after verification. This proves retained ciphertext integrity, **not** decryption or restore of this newest archive.
+
 **Distinction:** The last known ephemeral PostgreSQL recovery drill [run 44885726470](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44885726470) passed for a prior backup on 2026-11-21. Recovery of the **new 2026-11-22** archive and a full Auth/Storage service recovery have **not** been proven. A successful **scheduled** backup run has not been separately observed; this new success was manually triggered. Do not call this complete operational disaster recovery.
 
 ### 5. Open release gates
