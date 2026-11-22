@@ -2,7 +2,7 @@
 // Synthetic-only security regression for the current Pure Function database schema.
 // Runs exclusively against ephemeral loopback Supabase CLI Docker. No network email or Production writes.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -108,6 +108,34 @@ try {
   await ensureDenied(coachA.user.from('clients').update({coach_id:coachB.uid}).eq('id',cid).select('id'),
     'moving ownership to another coach');
   console.log('PASS: workout persistence and rejected cross-tenant create/delete/ownership reassignment');
+
+  // Disaster rollback rehearsal: only fake rows in the loopback Docker instance.
+  // This verifies scoped PostgreSQL data recovery, NOT a full Supabase service failover.
+  const snapshot = (process.env.RUNNER_TEMP || '/tmp') + '/pf-fake-rollback-' + t + '.dump';
+  try {
+    execFileSync('pg_dump', [
+      db, '--data-only', '--format=custom', '--no-owner', '--no-acl',
+      '--table=public.clients', '--table=public.coach_client_assignments',
+      '--table=public.workouts', '--file', snapshot
+    ], { timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] });
+    console.log('PASS: local synthetic clients/workouts/assignments snapshot created');
+    const wiped = await ok(coachA.user.from('clients').delete().eq('id',cid).select('id'));
+    assert.equal(wiped.length, 1, 'Expected local accidental-delete simulation to remove one synthetic client');
+    assert.equal((await fetchRows(coachA.user,'workouts','id',workout)).length,0,
+      'Expected local cascading delete before rollback');
+    execFileSync('pg_restore', [
+      '--dbname',db,'--data-only','--disable-triggers','--no-owner','--no-acl',
+      '--exit-on-error','--single-transaction',snapshot
+    ], { timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.equal((await fetchRows(coachA.user,'clients','id',cid)).length,1);
+    assert.equal((await fetchRows(coachA.user,'workouts','id',workout)).length,1);
+    assert.equal((await fetchRows(member.user,'workouts','id',workout)).length,1);
+    assert.equal((await fetchRows(coachB.user,'workouts','id',workout)).length,0);
+    assert.equal(q("select count(*) from public.coach_client_assignments where client_id='"+cid+"'"),'1');
+    console.log('PASS: synthetic accidental-delete database rollback restored rows and tenant isolation');
+  } finally {
+    rmSync(snapshot, { force: true });
+  }
 
   // Deletion is tested only against ephemeral, wholly synthetic records.
   const deleted = await ok(coachA.user.from('clients').delete().eq('id',cid).select('id'));
