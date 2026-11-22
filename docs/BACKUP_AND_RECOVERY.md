@@ -2,13 +2,14 @@
 
 **Target production Supabase project:** `rugwzvztweiffprkxfdc` (Free plan — no scheduled Supabase backups or PITR)  
 **Active repository:** `armshokri-debug/PUREFUNCTION-AISTUDIO`  
-**Status (2026-11-21):** **ONE LIVE ENCRYPTED BACKUP VERIFIED; EPHEMERAL POSTGRESQL RESTORE PASSED; DAILY AUTOMATION NOT ENABLED.**  
-The 2026-11-19 encrypted Google Drive archive and its manifest were verified. GitHub Actions successfully decrypted the archive and restored the database into an ephemeral isolated PostgreSQL instance on 2026-11-21. This is not a full Supabase service-level recovery drill. The repository variable `ENABLE_SUPABASE_BACKUP` is currently `false`, so the daily backup job skips execution. Do not claim continuous backup coverage until the owner enables the gate, an approved new backup is verified, and scheduled runs are confirmed.
+**Status (2026-11-22):** **TWO LIVE ENCRYPTED BACKUPS VERIFIED; PRIOR EPHEMERAL DATABASE RESTORE PASSED; FIRST SCHEDULED BACKUP AND FULL SERVICE RECOVERY NOT YET VERIFIED.**  
+A 2026-11-19 archive was verified and restored into an isolated ephemeral PostgreSQL instance on 2026-11-21. A second live encrypted backup succeeded on 2026-11-22. That run showed `ENABLE_SUPABASE_BACKUP=true` and successful Google Drive upload. The daily GitHub Actions schedule is configured, but the first successful **scheduled** execution and a full Supabase Auth/Storage recovery drill remain unverified. Never treat one successful manual job as proof of unattended coverage.
 
 ---
 
-## Verified evidence (as of 2026-11-21)
+## Verified evidence (as of 2026-11-22)
 
+- **Second live encrypted backup passed, 2026-11-22:** [Run 44988680112](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44988680112) recorded AES-256-GCM encryption, decryption verification, and Google Drive upload of a 210,123-byte encrypted archive (1 Storage object). This was a **manual** run, not evidence of a completed daily scheduled run.
 - **Live read-only encrypted backup created, 2026-11-19:** [GitHub Actions run 44571268249](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44571268249). The private Google Drive folder contains the 209,258-byte encrypted archive and a separate integrity manifest. No user data appears in GitHub artifacts.
 - **Drive download, decryption, checksum and inventory verified:** [Run 44573705661](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44573705661).
 - **Database restore to an ephemeral isolated PostgreSQL instance passed, 2026-11-21:** [Run 44885726470](https://github.com/armshokri-debug/PUREFUNCTION-AISTUDIO/actions/runs/44885726470). Full live Supabase Auth/Storage service recovery is **not** covered by this test.
@@ -50,8 +51,8 @@ The 2026-11-19 encrypted Google Drive archive and its manifest were verified. Gi
   - Default retention is `30` days (`BACKUP_RETENTION_DAYS=30`).
   - A hard safety floor (`BACKUP_MIN_KEEP_COUNT=7`) guarantees the 7 newest backups are **never** pruned even if backups fail for more than 30 days.
 - **Disabled by default**:
-  - `.github/workflows/supabase-backup.yml` has **no active `schedule:` trigger** (commented out).
-  - Live execution requires BOTH GitHub Repository Variable `ENABLE_SUPABASE_BACKUP=true` AND manual confirmation `RUN_BACKUP`.
+  - `.github/workflows/supabase-backup.yml` now has an active `schedule:` trigger at **03:17 UTC daily**, but the backup job is fail-closed when `ENABLE_SUPABASE_BACKUP` is not exactly `true`.
+  - Live execution requires GitHub Repository Variable `ENABLE_SUPABASE_BACKUP=true`; **manual** workflow_dispatch additionally requires `RUN_BACKUP`, while **scheduled** runs are allowed only when the same kill-switch is true.
 - **Safe failure reporting**:
   - If a live backup fails, the workflow opens/updates a GitHub Issue labeled `backup-alert` with only the run link and timestamp. Secrets are redacted and zero client data is printed.
 
@@ -136,7 +137,7 @@ Configure these in **GitHub → `armshokri-debug/PUREFUNCTION-AISTUDIO` → Sett
 | `BACKUP_S3_REGION` | `auto` | Only needed for `s3` provider (`auto` for Cloudflare R2). |
 | `BACKUP_RETENTION_DAYS` | `30` | Days to retain backups (minimum 7). |
 | `BACKUP_MIN_KEEP_COUNT` | `7` | Safety floor: minimum newest backups always preserved. |
-| `ENABLE_SUPABASE_BACKUP` | `false` | Master kill-switch. Keep `false` until approved and validated. |
+| `ENABLE_SUPABASE_BACKUP` | `true` was observed in successful run 44988680112 | Master kill-switch; can be set to `false` to pause live scheduled/manual backups. Current setting must be rechecked in repository settings if changed after this run. |
 
 ---
 
