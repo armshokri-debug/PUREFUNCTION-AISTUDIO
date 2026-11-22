@@ -11,6 +11,7 @@ import {
   Link2,
   Plus,
   Search,
+  Trash2,
   X,
   AlertTriangle
 } from 'lucide-react';
