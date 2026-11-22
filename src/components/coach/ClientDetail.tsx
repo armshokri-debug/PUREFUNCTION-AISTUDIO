@@ -5,7 +5,6 @@ import { ClientProfile, ClientSection, Exercise } from '../../types';
 import type { SyncState } from '../../cloud/useClientsStore';
 import { ClientAvatar } from '../VisualAssets';
 import { WorkoutBuilderView } from './WorkoutBuilderView';
-import { ExerciseLibraryView } from './ExerciseLibraryView';
 import { NewAssessmentView } from './NewAssessmentView';
 import { MonthlyReportView } from './MonthlyReportView';
 import { ProgressView } from './ProgressView';
@@ -27,7 +26,7 @@ export const SECTIONS: { id: ClientSection; label: string }[] = [
   { id: 'nutrition', label: 'Nutrition' }
 ];
 
-type ExSub = 'program' | 'library' | 'history';
+type ExSub = 'program' | 'history';
 type AsSub = 'overview' | 'new' | 'report';
 
 const Sub: React.FC<{ items: { id: string; label: string }[]; value: string; onChange: (v: string) => void }> = ({ items, value, onChange }) => (
@@ -56,7 +55,7 @@ export const ClientDetail: React.FC<{
   syncState?: SyncState;
   onFlush?: () => Promise<boolean>;
   onAddExercise: (clientId: string, date: string, exercise: Exercise) => void;
-}> = ({ client, section, onSection, onBack, onUpdateClient, onAddExercise, syncState, onFlush }) => {
+}> = ({ client, section, onSection, onBack, onUpdateClient, syncState, onFlush }) => {
   const [exSub, setExSub] = useState<ExSub>('program');
   const [asSub, setAsSub] = useState<AsSub>('overview');
   const one = [client];
@@ -101,14 +100,12 @@ export const ClientDetail: React.FC<{
             <Sub
               items={[
                 { id: 'program', label: 'Program' },
-                { id: 'library', label: 'Exercise library' },
                 { id: 'history', label: 'History' }
               ]}
               value={exSub}
               onChange={(v) => setExSub(v as ExSub)}
             />
             {exSub === 'program' && <WorkoutBuilderView clients={one} client={client} onSelectClientId={noop} onUpdateClient={onUpdateClient} syncState={syncState} onFlush={onFlush} />}
-            {exSub === 'library' && <ExerciseLibraryView clients={one} selectedClient={client} onAddExerciseToClientWorkout={onAddExercise} />}
             {exSub === 'history' && <WorkoutHistory client={client} />}
           </>
         )}

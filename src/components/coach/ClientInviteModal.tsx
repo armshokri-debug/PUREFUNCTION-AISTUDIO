@@ -316,17 +316,9 @@ export const ClientInviteModal: React.FC<{
               Account active — this client has already signed up.
             </div>
 
-            <div className="space-y-2 text-sm text-gray-600 leading-relaxed">
-              <p>
-                A new signup invitation is not needed for{' '}
-                <strong className="text-[#111827] break-all">{savedEmail}</strong>.
-              </p>
-              <p>
-                If your client cannot get in, share the sign-in link below and ask them to tap{' '}
-                <strong className="text-[#111827]">Forgot password</strong> on the Client sign-in
-                screen to set a new password safely.
-              </p>
-            </div>
+            <p className="text-sm text-gray-600">
+              Already registered. For access problems, use <strong>Forgot password</strong> on the sign-in page.
+            </p>
 
             <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-gray-200/80 space-y-2.5">
               <div className="flex items-center gap-2 text-xs font-semibold text-[#111827]">
@@ -381,10 +373,7 @@ export const ClientInviteModal: React.FC<{
             {isCloud ? (
               <div className="space-y-3">
                 <p className="text-sm text-gray-600 leading-relaxed break-words">
-                  {hasBeenInvited ? 'Resend' : 'Send'} a one-time secure invitation to{' '}
-                  <strong className="text-[#111827]">{client.name}</strong> at{' '}
-                  <strong className="text-[#111827]">{savedEmail || 'no email set'}</strong>.
-                  They will open one link, choose their password, and enter their workouts.
+                  Invite <strong className="text-[#111827]">{savedEmail || 'no email set'}</strong> to access their workouts.
                 </p>
 
                 <button
@@ -411,9 +400,7 @@ export const ClientInviteModal: React.FC<{
 
                 {mailing === 'accepted' && (
                   <p role="status" className="text-xs text-[#15803D] leading-relaxed">
-                    Invitation request accepted by the mail service. Ask your client to check their
-                    inbox and spam folder; if it expires or does not arrive, wait a minute and click{' '}
-                    <strong>Resend Invite</strong>.
+                    Invitation accepted. Ask your client to check their inbox.
                   </p>
                 )}
               </div>
@@ -485,10 +472,7 @@ export const ClientInviteModal: React.FC<{
                       <span>{copied === 'message' ? 'Copied' : 'Copy message'}</span>
                     </button>
                   </div>
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    Manual links require the client to verify their email in a second step. Use{' '}
-                    {primaryInviteLabel} above for one-email setup.
-                  </p>
+                  
                 </div>
               )}
             </div>

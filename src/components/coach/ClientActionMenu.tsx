@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   MoreHorizontal,
-  Eye,
-  Pencil,
   Send,
   Archive,
   RotateCcw,
@@ -15,8 +13,6 @@ interface ClientActionMenuProps {
   isTestClient: boolean;
   showInvite: boolean;
   inviteLabel: string;
-  onView: () => void;
-  onEdit?: () => void;
   onInvite?: () => void;
   onToggleArchive?: () => void;
   onDelete?: () => void;
@@ -30,8 +26,6 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
   isTestClient,
   showInvite,
   inviteLabel,
-  onView,
-  onEdit,
   onInvite,
   onToggleArchive,
   onDelete,
@@ -85,28 +79,6 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
           aria-label={`Actions for ${clientName}`}
           className="absolute right-0 mt-1.5 w-52 max-w-[calc(100vw-2rem)] rounded-xl bg-white border border-gray-200 shadow-[0_10px_30px_rgba(17,24,39,0.1)] py-1.5 z-30"
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => run(onView)}
-            className="w-full min-h-[44px] px-3.5 py-2 flex items-center gap-2.5 text-left text-sm font-medium text-[#111827] hover:bg-gray-50 transition-colors cursor-pointer"
-          >
-            <Eye className="w-4 h-4 text-gray-500 shrink-0" />
-            <span>View</span>
-          </button>
-
-          {onEdit && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => run(onEdit)}
-              className="w-full min-h-[44px] px-3.5 py-2 flex items-center gap-2.5 text-left text-sm font-medium text-[#111827] hover:bg-gray-50 transition-colors cursor-pointer"
-            >
-              <Pencil className="w-4 h-4 text-gray-500 shrink-0" />
-              <span>Edit Client</span>
-            </button>
-          )}
-
           {showInvite && onInvite && (
             <button
               type="button"

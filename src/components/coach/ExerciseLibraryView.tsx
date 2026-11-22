@@ -248,7 +248,7 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
             aria-label="Add on date"
             className={field}
           />
-          <span className="text-xs text-gray-400 hidden sm:inline">Tap + on any exercise to add it.</span>
+
         </div>
       )}
 
@@ -277,7 +277,6 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
         )}
       </div>
 
-      <p className="text-[11px] text-gray-400 mb-2.5 -mt-1">Try “db press”, “rdl”, “glutes” or “single leg”.</p>
 
       {/* scope */}
       <div className="flex flex-wrap min-w-0 gap-1.5 pb-2" role="tablist" aria-label="Show">

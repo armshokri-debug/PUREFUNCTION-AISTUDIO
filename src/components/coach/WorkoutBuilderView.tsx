@@ -21,6 +21,7 @@ import { searchExercises, useExerciseLibrary } from '../../state/ExerciseLibrary
 import { MUSCLE_GROUPS, equipmentTypeOf, groupOf } from '../../lib/exerciseSearch';
 import { WEIGHT_UNIT, roundLb } from '../../lib/units';
 import { ExerciseThumb } from '../ExerciseMedia';
+import { ActionDropdown } from './ActionDropdown';
 import { WeightInput } from '../WeightInput';
 import {
   addDays,
@@ -265,7 +266,8 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
           <h1 className="text-2xl sm:text-[34px] font-bold tracking-tight text-[#111827] leading-tight">
             Workout Builder
           </h1>
-          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-sm sm:text-base text-gray-500">
+          {clients.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-sm sm:text-base text-gray-500">
             <div className="relative inline-flex items-center">
               <select
                 value={client.id}
@@ -285,16 +287,19 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             <span>
               Phase {client.phaseNumber} ({client.phaseName})
             </span>
-          </div>
+            </div>
+          )}
         </div>
 
-        <button
-          onClick={handleCopyWeek}
-          className="self-start sm:self-auto inline-flex items-center gap-2 bg-white hover:bg-gray-50 text-[#111827] border border-gray-200 text-sm font-medium px-4 py-2.5 rounded-xl cursor-pointer whitespace-nowrap"
-        >
-          <Copy className="w-4 h-4 text-gray-500" />
-          <span>Copy week to next week</span>
-        </button>
+        <div className="self-start sm:self-auto">
+          <ActionDropdown label="Workout actions" items={[
+            { label: 'Copy week to next week', onSelect: handleCopyWeek },
+            ...(workout ? [
+              { label: 'Copy workout to date', onSelect: () => setCopyTo(addDays(selectedDate, 7)) },
+              { label: 'Delete workout', onSelect: () => setConfirmDelete(true), destructive: true }
+            ] : [])
+          ]} />
+        </div>
       </div>
 
       {/* Week navigation */}
@@ -596,78 +601,47 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
               >
                 <Plus className="w-4 h-4" /> Add exercise
               </button>
-              <div className="hidden lg:flex mt-3 items-center justify-center border-2 border-dashed border-gray-200 text-sm text-gray-400 py-5 rounded-2xl">
-                Drag an exercise here, or tap + in the library
-              </div>
 
               {/* Day actions */}
               <div className="mt-5 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                {workout.status !== 'completed' && (
-                  <button
-                    onClick={() => patchWorkout({ status: 'completed', completedAt: new Date().toISOString() })}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-[#DCFCE7] text-[#166534] cursor-pointer"
-                  >
-                    Mark completed
-                  </button>
-                )}
-                {workout.status !== 'missed' && (
-                  <button
-                    onClick={() => patchWorkout({ status: 'missed' })}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-[#FEE2E2] text-[#991B1B] cursor-pointer"
-                  >
-                    Mark missed
-                  </button>
-                )}
-                {workout.status !== 'planned' && (
-                  <button
-                    onClick={() => patchWorkout({ status: 'planned', completedAt: undefined })}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-gray-100 text-gray-700 cursor-pointer"
-                  >
-                    Back to planned
-                  </button>
-                )}
-
-                {copyTo === null ? (
-                  <button
-                    onClick={() => setCopyTo(addDays(selectedDate, 7))}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-[#111827] cursor-pointer inline-flex items-center gap-1.5"
-                  >
-                    <Copy className="w-3.5 h-3.5" /> Copy to…
-                  </button>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5">
-                    <input
-                      type="date"
-                      value={copyTo}
-                      onChange={(e) => setCopyTo(e.target.value)}
-                      aria-label="Copy to date"
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-base sm:text-xs"
-                    />
-                    <button onClick={handleCopyDay} disabled={!copyTo || copyTo === selectedDate} className="px-3 py-2 rounded-lg text-xs font-semibold bg-[#111827] text-white disabled:opacity-40 cursor-pointer">
-                      Copy
-                    </button>
-                    <button onClick={() => setCopyTo(null)} aria-label="Cancel copy" className="p-1.5 text-gray-400 cursor-pointer">
-                      <X className="w-4 h-4" />
-                    </button>
+                <label className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-gray-600">
+                  <span>Status</span>
+                  <select aria-label="Workout status" value={workout.status}
+                    onChange={(event) => {
+                      const next = event.target.value as Workout['status'];
+                      patchWorkout(next === 'completed'
+                        ? { status: next, completedAt: new Date().toISOString() }
+                        : { status: next, completedAt: undefined });
+                    }}
+                    className="min-h-[44px] rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-[#111827]">
+                    <option value="planned">Planned</option>
+                    <option value="completed">Completed</option>
+                    <option value="missed">Missed</option>
+                  </select>
+                </label>
+                {copyTo !== null && (
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    <input type="date" value={copyTo} onChange={(e) => setCopyTo(e.target.value)}
+                      aria-label="Copy to date" className="border border-gray-200 rounded-lg px-2 py-1.5 text-base sm:text-sm" />
+                    <button onClick={handleCopyDay} disabled={!copyTo || copyTo === selectedDate}
+                      className="min-h-[44px] px-3 rounded-lg text-sm font-semibold bg-[#111827] text-white disabled:opacity-40">Copy</button>
+                    <button onClick={() => setCopyTo(null)} aria-label="Cancel copy"
+                      className="min-h-[44px] px-2 text-gray-500"><X className="w-4 h-4" /></button>
                   </span>
                 )}
-
                 <span className="flex-1" />
-                {confirmDelete ? (
-                  <button
-                    onClick={() => {
+                {confirmDelete && (
+                  <div className="inline-flex flex-wrap items-center gap-2">
+                    <button onClick={() => {
                       commitClient(removeWorkout(latestClientRef.current, workout.id));
                       setConfirmDelete(false);
                       flash('Workout deleted');
-                    }}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold text-white bg-red-600 cursor-pointer"
-                  >
-                    Tap again to delete
-                  </button>
-                ) : (
-                  <button onClick={() => setConfirmDelete(true)} className="px-2 py-2 text-xs font-medium text-gray-400 hover:text-red-600 cursor-pointer inline-flex items-center gap-1">
-                    <Trash2 className="w-3.5 h-3.5" /> Delete workout
-                  </button>
+                    }} className="min-h-[44px] rounded-xl bg-red-600 px-3 text-sm font-semibold text-white">
+                      Confirm delete workout
+                    </button>
+                    <button onClick={() => setConfirmDelete(false)}
+                      className="min-h-[44px] px-2 text-sm text-gray-600">Cancel</button>
+                  </div>
                 )}
               </div>
             </>
@@ -679,7 +653,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-[#111827]">Exercise Library</h2>
             <span className="text-[11px] text-gray-400">
-              {results.length.toLocaleString()} exercises · drag or tap +
+              {results.length.toLocaleString()} exercises
             </span>
           </div>
 

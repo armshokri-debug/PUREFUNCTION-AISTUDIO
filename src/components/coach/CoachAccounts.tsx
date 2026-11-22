@@ -12,7 +12,6 @@ export function CoachAccounts() {
   const [allowed, setAllowed] = useState(false);
   const [coaches, setCoaches] = useState<CoachInviteRow[]>([]);
   const [email, setEmail] = useState('');
-  const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
@@ -45,9 +44,6 @@ export function CoachAccounts() {
   const normalized = email.trim().toLowerCase();
   const existing = coaches.find((coach) => coach.email === normalized);
   const existingState = existing ? coachInviteState(existing) : null;
-  const visible = coaches.filter((coach) =>
-    (coach.display_name + ' ' + coach.email).toLowerCase().includes(search.trim().toLowerCase())
-  );
 
   const invite = async (address: string) => {
     if (busy) return;
@@ -108,8 +104,7 @@ export function CoachAccounts() {
   };
 
   return <section className="bg-white rounded-[28px] border border-gray-100 p-4 sm:p-6 mt-6 min-w-0">
-    <h2 className="font-bold mb-1">Coaches</h2>
-    <p className="text-sm text-gray-500 mb-4">Invite a coach by email. Each active coach has their own clients.</p>
+    <h2 className="font-bold mb-4">Coaches</h2>
     <form className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3" onSubmit={(event) => {
       event.preventDefault();
       void invite(email);
@@ -127,19 +122,13 @@ export function CoachAccounts() {
     {existingState === 'verification_needed' && <p className="text-sm mt-2">Coach signup is pending email verification. Use the signup page to resend verification.</p>}
     {message && <p role="status" className="text-sm mt-3 break-words">{message}</p>}
 
-    <div className="mt-5">
-      <label htmlFor="coach-search" className="text-sm font-semibold">Coach invitations and accounts</label>
-      <input id="coach-search" type="search" placeholder="Search by name or email" value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        className="mt-2 w-full border rounded-xl p-3 text-base" />
-    </div>
-    <ul className="space-y-3 mt-3">
-      {visible.map((coach) => {
+    <ul className="space-y-2 mt-5">
+      {coaches.map((coach) => {
         const state = coachInviteState(coach);
-        const label = state === 'active' ? 'Active coach'
-          : state === 'verification_needed' ? 'Awaiting email verification'
-          : state === 'existing_non_coach' ? 'Existing account — not a coach'
-          : 'Invited — awaiting signup';
+        const label = state === 'active' ? 'Active'
+          : state === 'verification_needed' ? 'Verify email'
+          : state === 'existing_non_coach' ? 'Existing client account'
+          : 'Pending';
         return <li key={coach.email} className="border border-gray-100 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold break-all">{coach.display_name || coach.email}</p>
@@ -152,15 +141,12 @@ export function CoachAccounts() {
             className="min-h-[44px] border rounded-xl px-3 text-sm disabled:opacity-40">Cancel invitation</button>}
         </li>;
       })}
-      {visible.length === 0 && <li className="text-sm text-gray-500">No matching coach invitations.</li>}
+      {coaches.length === 0 && <li className="text-sm text-gray-500">No coaches yet.</li>}
     </ul>
 
-    <p className="text-sm mt-5">If an email cannot be delivered, copy this link and give it to the invited coach. They must use their allowlisted email.</p>
-    <div className="flex flex-wrap gap-2 mt-2">
-      <input aria-label="Coach signup link" value={signupUrl} readOnly onFocus={(event) => event.currentTarget.select()}
-        className="min-w-0 basis-64 flex-1 border rounded-xl p-2 text-base" />
-      <button type="button" onClick={() => void copyLink()} className="min-h-[44px] border rounded-xl px-3 text-sm">Copy signup link</button>
-    </div>
-    {copyStatus && <p role="status" className="text-sm mt-2">{copyStatus}</p>}
+    <button type="button" onClick={() => void copyLink()} className="min-h-[44px] mt-3 text-sm font-medium text-gray-600 underline">Copy signup link</button>
+    {copyStatus && <p role="status" className="text-sm mt-2 break-all">{copyStatus}</p>}
+    {copyStatus === 'Select the link to copy it manually.' && <input aria-label="Coach signup link" value={signupUrl} readOnly
+      onFocus={(event) => event.currentTarget.select()} className="w-full border rounded-xl p-2 text-base" />}
   </section>;
 }

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ClientProfile, WorkoutBlock } from '../../types';
 import { DESIGNER_UNAVAILABLE_LABEL, useProgramTemplates } from '../../cloud/programTemplates';
+import { ActionDropdown } from './ActionDropdown';
 import {
   applyProgramTemplate,
   createProgramTemplate,
@@ -225,7 +226,6 @@ export const ProgramTemplates: React.FC<{
     <section className="bg-white rounded-2xl border border-gray-100 p-4 sm:p-6 space-y-4 mb-6 min-w-0">
       <div>
         <h2 className="text-lg font-bold text-[#111827]">Program templates</h2>
-        <p className="text-sm text-gray-500">Save a week or 12 weeks. Apply to multiple clients without overwriting logged workouts.</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <label className="min-w-0 text-xs font-semibold text-gray-600">Template name
@@ -265,23 +265,27 @@ export const ProgramTemplates: React.FC<{
             >
               {showPreview ? 'Hide preview' : 'Show preview'}
             </button>
-            <button
-              type="button"
-              disabled={operationLocked}
-              onClick={startEditing}
-              className="min-h-[44px] border border-gray-200 rounded-xl px-4 text-sm font-medium text-[#111827] hover:bg-gray-50 disabled:opacity-50"
-            >
-              Edit template
-            </button>
-            <button
-              type="button"
-              disabled={operationLocked}
-              onClick={startDuplicating}
-              className="min-h-[44px] border border-gray-200 rounded-xl px-4 text-sm font-medium text-[#111827] hover:bg-gray-50 disabled:opacity-50"
-            >
-              Duplicate template
-            </button>
-            <button type="button" disabled={operationLocked} onClick={async () => { if (!selected || !window.confirm(`Delete template ${selected.name}?`)) return; try { setBusy(true); await remove(selected.id); setSelectedId(''); setFeedback('Template deleted.'); } catch { setFeedback('Could not delete template.'); } finally { setBusy(false); } }} className="min-h-[44px] border rounded-xl px-4 text-sm disabled:opacity-50">Delete template</button>
+            <ActionDropdown label="Template actions" items={[
+              { label: 'Edit template', onSelect: startEditing, disabled: operationLocked },
+              { label: 'Duplicate template', onSelect: startDuplicating, disabled: operationLocked },
+              { label: 'Delete template', disabled: operationLocked, destructive: true,
+                onSelect: () => {
+                  if (!selected || !window.confirm(`Delete template ${selected.name}?`)) return;
+                  void (async () => {
+                    try {
+                      setBusy(true);
+                      await remove(selected.id);
+                      setSelectedId('');
+                      setFeedback('Template deleted.');
+                    } catch {
+                      setFeedback('Could not delete template.');
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }
+              }
+            ]} />
           </div>
           <p
             id="program-template-designer"
