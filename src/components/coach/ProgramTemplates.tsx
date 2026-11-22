@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { ClientProfile, WorkoutBlock } from '../../types';
-import { useProgramTemplates } from '../../cloud/programTemplates';
+import { DESIGNER_UNAVAILABLE_LABEL, useProgramTemplates } from '../../cloud/programTemplates';
 import { ActionDropdown } from './ActionDropdown';
 import {
   applyProgramTemplate,
@@ -74,7 +74,7 @@ export const ProgramTemplates: React.FC<{
   onApply: (template: ProgramTemplate, ids: string[], start: string) => void;
   onFlush?: () => Promise<boolean>;
 }> = ({ clients, client, onApply, onFlush }) => {
-  const { templates, ready, loading, error, reload, save, update, remove } = useProgramTemplates();
+  const { templates, designerNames, ready, loading, error, reload, save, update, remove } = useProgramTemplates();
   const [name, setName] = useState('');
   const [scope, setScope] = useState<'week' | 'program'>('week');
   const [sourceDate, setSourceDate] = useState(todayISO());
@@ -114,6 +114,7 @@ export const ProgramTemplates: React.FC<{
     );
   }
   const selected = templates.find((t) => t.id === selectedId) ?? templates[0];
+  const designerName = selected ? designerNames[selected.id] ?? null : null;
   const previewData = selected ? groupTemplateDaysByWeek(selected) : null;
   const previewScopeLabel =
     selected?.scope === 'program'
@@ -255,9 +256,16 @@ export const ProgramTemplates: React.FC<{
           </fieldset>
           <div className="flex flex-wrap gap-3">
             <button type="button" disabled={operationLocked} onClick={() => void apply()} className="min-h-[44px] bg-[#FFC809] text-[#111827] font-bold text-sm px-5 rounded-xl disabled:opacity-50">Apply template</button>
+            <button
+              type="button"
+              aria-expanded={showPreview}
+              aria-controls="program-template-preview"
+              onClick={() => setShowPreview((prev) => !prev)}
+              className="min-h-[44px] border border-gray-200 rounded-xl px-4 text-sm font-medium text-[#111827] hover:bg-gray-50"
+            >
+              {showPreview ? 'Hide preview' : 'Show preview'}
+            </button>
             <ActionDropdown label="Template actions" items={[
-              { label: showPreview ? 'Hide preview' : 'Preview template',
-                onSelect: () => setShowPreview((prev) => !prev) },
               { label: 'Edit template', onSelect: startEditing, disabled: operationLocked },
               { label: 'Duplicate template', onSelect: startDuplicating, disabled: operationLocked },
               { label: 'Delete template', disabled: operationLocked, destructive: true,
@@ -279,6 +287,15 @@ export const ProgramTemplates: React.FC<{
               }
             ]} />
           </div>
+          <p
+            id="program-template-designer"
+            className="text-xs text-gray-500 min-w-0 max-w-full [overflow-wrap:anywhere]"
+          >
+            Designer:{' '}
+            <span className={designerName ? 'font-medium text-gray-700' : 'text-gray-500'}>
+              {designerName ?? DESIGNER_UNAVAILABLE_LABEL}
+            </span>
+          </p>
           {duplicatingSource && (
             <form
               id="program-template-duplicate"
