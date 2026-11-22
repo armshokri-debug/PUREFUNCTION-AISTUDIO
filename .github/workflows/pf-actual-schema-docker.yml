@@ -83,7 +83,7 @@ jobs:
           psql "$local_db" -X -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS private;' >/dev/null
           pg_restore -l "$RUNNER_TEMP/pf-schema-only.dump" > "$RUNNER_TEMP/pf-ddl.list"
           awk '!/^[0-9]+;.* SCHEMA - (public|private) /' "$RUNNER_TEMP/pf-ddl.list" > "$RUNNER_TEMP/pf-ddl-filtered.list"
-          if ! pg_restore --dbname="$local_db" --no-owner --exit-on-error --single-transaction \
+          if ! pg_restore --dbname="$local_db" --no-owner --no-acl --exit-on-error --single-transaction \
             --use-list="$RUNNER_TEMP/pf-ddl-filtered.list" "$RUNNER_TEMP/pf-schema-only.dump" \
             >/dev/null 2>"$RUNNER_TEMP/pf-restore-error.log"; then
             echo 'BLOCKED: isolated restore failed'
@@ -91,6 +91,16 @@ jobs:
             elif grep -qi 'does not exist' "$RUNNER_TEMP/pf-restore-error.log"; then echo 'Category: missing local dependency'
             elif grep -qi 'permission denied' "$RUNNER_TEMP/pf-restore-error.log"; then echo 'Category: local role/permission mismatch'
             else echo 'Category: other incompatibility'; fi
+            # Safe diagnostics only: print PostgreSQL's first error line, never its SQL command.
+            python3 - "$RUNNER_TEMP/pf-restore-error.log" <<'PY'
+import re,sys
+for line in open(sys.argv[1],errors='replace'):
+    if 'ERROR:' in line or 'FATAL:' in line:
+        err=line.split('ERROR:',1)[-1] if 'ERROR:' in line else line.split('FATAL:',1)[-1]
+        err=re.sub(r"'[^']*'|\"[^\"]*\"",'[object]',err)
+        err=re.sub(r'https?://\\S+|\\S+@\\S+','[redacted]',err)
+        print('Safe PostgreSQL error:',err.strip()[:120]);break
+PY
             exit 1
           fi
           tables="$(psql "$local_db" -X -At -c "select count(*) from pg_tables where schemaname='public'")"
