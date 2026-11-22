@@ -104,7 +104,7 @@ const today = iso(new Date());
   // Send Invite, confirm Resend Invite appears afterwards, and edit reminders in Edit Client
   await C.getByRole('button', { name: 'Send Invite', exact: true }).click();
   await C.getByRole('dialog').getByRole('button', { name: 'Send Invite', exact: true }).click();
-  await C.getByText(/Invitation request accepted by the mail service/).waitFor({ timeout: 5000 });
+  await C.getByText(/Invitation accepted\. Ask your client to check their inbox/).waitFor({ timeout: 5000 });
   ok(mock.db.emails.some((e) => e.kind === 'invite' && e.to === 'ryan@example.com'), 'coach emails the invite in one tap');
   await C.getByRole('button', { name: 'Close', exact: true }).last().click();
   await C.waitForTimeout(500);
