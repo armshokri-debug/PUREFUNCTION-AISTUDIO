@@ -108,3 +108,32 @@ export async function sendInviteEmail(clientId: string): Promise<string | null> 
   const result = await sendInviteEmailResult(clientId);
   return result.ok ? null : result.error;
 }
+
+/** Resending skips the allowlist write. The Edge Function checks the grant itself. */
+export async function sendCoachInvite(email: string, alreadyAllowed: boolean): Promise<string | null> {
+  if (!supabase) return 'Cloud is not configured.';
+  const address = email.trim().toLowerCase();
+  try {
+    if (!alreadyAllowed) {
+      const { error } = await supabase.rpc('pf_manage_trainer', {
+        p_action: 'invite', p_email: address, p_client_id: null
+      });
+      if (error) return error.message;
+    }
+
+    const { data, error } = await supabase.functions.invoke('invite-trainer', { body: { email: address } });
+    if (error) {
+      const response: unknown = error.context;
+      if (response instanceof Response) {
+        const payload = await response.json().catch(() => null);
+        const detail = payload?.error ?? payload?.message;
+        if (typeof detail === 'string' && detail.trim()) return detail;
+        return `Coach invitation failed (HTTP ${response.status}).`;
+      }
+      return error.message;
+    }
+    return data?.ok === true ? null : 'The server did not confirm that the invitation was sent.';
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Coach invitation could not be completed.';
+  }
+}
