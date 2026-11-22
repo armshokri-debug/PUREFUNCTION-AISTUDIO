@@ -3,7 +3,9 @@ import { getClientStatus } from '../../components/coach/ClientsView';
 import {
   createClientProfile,
   duplicateClientEmailMessage,
-  findDuplicateClientByEmail
+  evaluateClientAttention,
+  findDuplicateClientByEmail,
+  getClientSnapshotStats
 } from '../clients';
 
 function makeClient(overrides: Partial<ReturnType<typeof createClientProfile>> = {}) {
@@ -72,5 +74,149 @@ describe('Duplicate client email detection (Gmail & Googlemail)', () => {
   it('excludes the client currently being edited', () => {
     const client = makeClient({ id: 'c1', email: 'alex@gmail.com' });
     expect(findDuplicateClientByEmail([client], 'alex@googlemail.com', 'c1')).toBeUndefined();
+  });
+});
+
+describe('Needs Attention evaluation (real assessment & workout signals)', () => {
+  const today = '2026-11-22';
+
+  it('returns null for archived clients or clients who are fully on track', () => {
+    const onTrack = makeClient({
+      nextAssessmentDays: 14,
+      adherenceCompleted: 3,
+      adherenceTotal: 4,
+      workouts: [
+        {
+          id: 'w1',
+          date: '2026-11-20',
+          title: 'Strength A',
+          focus: 'Lower',
+          status: 'completed',
+          blocks: []
+        },
+        {
+          id: 'w2',
+          date: '2026-11-23',
+          title: 'Strength B',
+          focus: 'Upper',
+          status: 'planned',
+          blocks: []
+        }
+      ]
+    });
+    expect(evaluateClientAttention(onTrack, today)).toBeNull();
+
+    const archived = makeClient({ archived: true, nextAssessmentDays: 0 });
+    expect(evaluateClientAttention(archived, today)).toBeNull();
+  });
+
+  it('prioritizes urgent pain reports and missed workouts ahead of assessment warnings', () => {
+    const client = makeClient({
+      nextAssessmentDays: 3,
+      adherenceCompleted: 1,
+      adherenceTotal: 4,
+      workouts: [
+        {
+          id: 'w1',
+          date: '2026-11-19',
+          title: 'Lower A',
+          focus: 'Lower',
+          status: 'completed',
+          blocks: [
+            {
+              id: 'b1',
+              exerciseId: 'ex-1',
+              name: 'Goblet Squat',
+              sets: 3,
+              reps: '8',
+              loadKg: 20,
+              restSec: 90,
+              notes: '',
+              loggedSets: [],
+              pain: true
+            }
+          ]
+        },
+        {
+          id: 'w2',
+          date: '2026-11-20',
+          title: 'Upper A',
+          focus: 'Upper',
+          status: 'missed',
+          blocks: []
+        }
+      ]
+    });
+
+    const summary = evaluateClientAttention(client, today);
+    expect(summary).not.toBeNull();
+    expect(summary?.severity).toBe('urgent');
+    expect(summary?.primarySection).toBe('exercises');
+    expect(summary?.reasons.map((r) => r.code)).toEqual([
+      'pain_reported',
+      'missed_workouts',
+      'assessment_due',
+      'low_adherence'
+    ]);
+    expect(summary?.reasons[0].label).toContain('Goblet Squat');
+  });
+
+  it('flags brand-new clients with no assessments or scheduled workouts accurately', () => {
+    const fresh = makeClient();
+    const summary = evaluateClientAttention(fresh, today);
+    expect(summary?.severity).toBe('warning');
+    expect(summary?.reasons.map((r) => r.code)).toEqual(['assessment_missing', 'no_workouts']);
+  });
+});
+
+describe('Client profile snapshot stats', () => {
+  it('extracts real counts and avoids fabricating missing values', () => {
+    const empty = makeClient();
+    expect(getClientSnapshotStats(empty)).toEqual({
+      completedWorkouts: 0,
+      totalWorkouts: 0,
+      lastCompletedWorkoutDate: null,
+      completedAssessments: 0,
+      lastAssessmentDate: null,
+      goalsCount: 0,
+      notesCount: 0,
+      progressPointsCount: 0,
+      nutritionCalories: null,
+      nutritionProtein: null,
+      weightKg: null,
+      bodyFatPercent: null
+    });
+
+    const populated = makeClient({
+      inBody: { ...empty.inBody, weight: 78, bodyFatPercent: 16.5 },
+      nutrition: { calories: 2450, protein: 175 },
+      coachNotes: [{ id: 'n1', date: '2026-11-20', text: 'Good hip control' }],
+      workouts: [
+        {
+          id: 'w1',
+          date: '2026-11-18',
+          title: 'Day 1',
+          focus: 'Lower',
+          status: 'completed',
+          blocks: []
+        },
+        {
+          id: 'w2',
+          date: '2026-11-21',
+          title: 'Day 2',
+          focus: 'Upper',
+          status: 'completed',
+          blocks: []
+        }
+      ]
+    });
+    const stats = getClientSnapshotStats(populated);
+    expect(stats.completedWorkouts).toBe(2);
+    expect(stats.lastCompletedWorkoutDate).toBe('2026-11-21');
+    expect(stats.weightKg).toBe(78);
+    expect(stats.bodyFatPercent).toBe(16.5);
+    expect(stats.nutritionCalories).toBe(2450);
+    expect(stats.nutritionProtein).toBe(175);
+    expect(stats.notesCount).toBe(1);
   });
 });

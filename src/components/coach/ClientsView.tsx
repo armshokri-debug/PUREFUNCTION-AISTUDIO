@@ -21,7 +21,13 @@ import { ClientActionMenu } from './ClientActionMenu';
 import { ClientDeleteModal, type DeleteClientOutcome } from './ClientDeleteModal';
 import { ClientProfile, ClientSection } from '../../types';
 import { ClientAvatar } from '../VisualAssets';
-import { duplicateClientEmailMessage, findDuplicateClientByEmail } from '../../lib/clients';
+import {
+  duplicateClientEmailMessage,
+  findDuplicateClientByEmail,
+  getClientSnapshotStats
+} from '../../lib/clients';
+import { formatDate } from '../../lib/workouts';
+import { formatWeight } from '../../lib/units';
 
 interface ClientsViewProps {
   clients: ClientProfile[];
@@ -73,20 +79,6 @@ export function getClientStatus(
   }
   return { kind: 'active', label: 'Active', textClass: 'text-[#15803D]' };
 }
-
-const QUICK_SECTIONS: {
-  id: ClientSection;
-  label: string;
-  hint: string;
-  icon: React.FC<{ className?: string }>;
-}[] = [
-  { id: 'exercises', label: 'Exercises', hint: 'Workouts & schedule', icon: Dumbbell },
-  { id: 'assessment', label: 'Assessment', hint: 'ROM, PRI & posture', icon: ClipboardCheck },
-  { id: 'notes', label: 'Notes', hint: 'Coach observations', icon: StickyNote },
-  { id: 'goals', label: 'Goals', hint: 'Targets & milestones', icon: Target },
-  { id: 'progression', label: 'Progression', hint: 'Trends & 1RM charts', icon: LineChart },
-  { id: 'nutrition', label: 'Nutrition', hint: 'Targets & food diary', icon: Utensils }
-];
 
 export const ClientsView: React.FC<ClientsViewProps> = ({
   clients,
@@ -146,7 +138,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
   const activeSelection: ClientProfile | undefined =
     filteredClients.find((c) => c.id === selectedClientId) ||
-    clients.find((c) => c.id === selectedClientId && Boolean(c.archived) === (listFilter === 'archived')) ||
+    pool.find((c) => c.id === selectedClientId) ||
     filteredClients[0] ||
     pool[0];
 
@@ -182,17 +174,17 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     setNewEmail('');
     setIsAddModalOpen(false);
     setListFilter('active');
-    // Cloud: right after adding, show the invite to send (like TrueCoach)
+    // Cloud: right after adding, show the invite to send
     if (newId && joinedIds) setInviteFor(newId);
   };
 
-  const handleRowClick = (client: ClientProfile) => {
-    const isDesktopSplit =
-      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-        ? window.matchMedia('(min-width: 768px)').matches
-        : true;
+  const isDesktopViewport = () =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 768px)').matches
+      : true;
 
-    if (!isDesktopSplit) {
+  const handleRowClick = (client: ClientProfile) => {
+    if (!isDesktopViewport()) {
       onHighlightClient?.(client.id);
       setMobileDetailOpen(true);
       return;
@@ -229,7 +221,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     if (!target.isTestClient && !permanentDeleteEnabled) {
       return {
         ok: false,
-        error: 'Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead.',
+        error:
+          'Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead.',
         retryable: false
       };
     }
@@ -248,15 +241,23 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     return { ok: true };
   };
 
-  // Real numbers across active clients
+  // Real metrics across active clients
   const activeCount = activeClients.length;
   const assessmentsDueCount = activeClients.filter((c) => c.nextAssessmentDays <= 5).length;
   const weekDone = activeClients.reduce((a, c) => a + c.adherenceCompleted, 0);
   const weekTotal = activeClients.reduce((a, c) => a + c.adherenceTotal, 0);
 
   const selectedStatus = activeSelection ? getClientStatus(activeSelection, joinedIds) : null;
+  const selectedSnapshot = useMemo(
+    () => (activeSelection ? getClientSnapshotStats(activeSelection) : null),
+    [activeSelection]
+  );
+
   const selectedUnjoined = Boolean(
-    activeSelection && joinedIds && !joinedIds.has(activeSelection.id) && !activeSelection.isTestClient
+    activeSelection &&
+      joinedIds &&
+      !joinedIds.has(activeSelection.id) &&
+      !activeSelection.isTestClient
   );
   const selectedInviteButtonLabel = selectedUnjoined
     ? activeSelection?.invitedAt
@@ -264,464 +265,554 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       : 'Not joined · Invite'
     : 'Invite';
 
-  return (
-    <div className="max-w-6xl mx-auto w-full min-w-0">
-      {/* Page Header Row */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-[32px] font-bold tracking-tight text-[#111827] leading-tight">
-            Clients
-          </h1>
-        </div>
+  const workspaceSections = useMemo(() => {
+    if (!activeSelection || !selectedSnapshot) return [];
+    return [
+      {
+        id: 'exercises' as ClientSection,
+        label: 'Exercises',
+        hint:
+          activeSelection.adherenceTotal > 0
+            ? `${activeSelection.adherenceCompleted}/${activeSelection.adherenceTotal} this week · ${selectedSnapshot.completedWorkouts} logged`
+            : 'Workouts & schedule',
+        icon: Dumbbell
+      },
+      {
+        id: 'assessment' as ClientSection,
+        label: 'Assessment',
+        hint:
+          selectedSnapshot.completedAssessments > 0
+            ? `${selectedSnapshot.completedAssessments} completed · ROM & PRI`
+            : 'ROM, PRI & posture',
+        icon: ClipboardCheck
+      },
+      {
+        id: 'progression' as ClientSection,
+        label: 'Progression',
+        hint:
+          selectedSnapshot.progressPointsCount > 0
+            ? `${selectedSnapshot.progressPointsCount} checkpoints · trends & 1RM`
+            : 'Trends & 1RM charts',
+        icon: LineChart
+      },
+      {
+        id: 'goals' as ClientSection,
+        label: 'Goals',
+        hint:
+          selectedSnapshot.goalsCount > 0
+            ? `${selectedSnapshot.goalsCount} active targets`
+            : 'Targets & milestones',
+        icon: Target
+      },
+      {
+        id: 'notes' as ClientSection,
+        label: 'Notes',
+        hint:
+          selectedSnapshot.notesCount > 0
+            ? `${selectedSnapshot.notesCount} saved notes`
+            : 'Coach observations',
+        icon: StickyNote
+      },
+      {
+        id: 'nutrition' as ClientSection,
+        label: 'Nutrition',
+        hint: selectedSnapshot.nutritionCalories
+          ? `${selectedSnapshot.nutritionCalories} kcal target`
+          : 'Targets & food diary',
+        icon: Utensils
+      }
+    ];
+  }, [activeSelection, selectedSnapshot]);
 
-        <div className="flex flex-wrap items-center gap-2">
-          {showTestClientButton && onCreateTestClient && (
-            <button
-              type="button"
-              disabled={clients.some((c) => c.isTestClient)}
-              onClick={onCreateTestClient}
-              className="min-h-[44px] px-3.5 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl font-medium text-sm text-[#374151] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
-            >
-              + Test Client
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="min-h-[44px] inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add client</span>
-          </button>
-        </div>
+  return (
+    <div className="max-w-6xl mx-auto w-full min-w-0 space-y-6">
+      {/* 1. Header Row — Page Title + Single Primary Action */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl sm:text-[32px] font-bold tracking-tight text-[#111827] leading-tight">
+          Clients
+        </h1>
+
+        <button
+          type="button"
+          onClick={() => setIsAddModalOpen(true)}
+          className="min-h-[44px] inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Add client</span>
+        </button>
       </div>
 
-      {/* Top 3 Summary KPI Strip — hides on mobile when detail panel is open to reduce clutter */}
-      <div
-        className={`grid grid-cols-3 gap-2.5 sm:gap-4 mb-6 ${
+      {/* 2. Light Summary Row — 3 Core Metrics */}
+      <section
+        aria-label="Clients summary"
+        className={`grid grid-cols-3 gap-2.5 sm:gap-4 ${
           mobileDetailOpen ? 'hidden md:grid' : 'grid'
         }`}
       >
         <div className="bg-white rounded-2xl px-3.5 py-3.5 sm:px-5 sm:py-4 border border-gray-200/80 min-w-0 flex flex-col justify-between">
-          <div className="text-xs font-medium text-gray-500 mb-1 truncate">Clients</div>
+          <div className="text-xs font-medium text-gray-500 mb-1.5 truncate">Active clients</div>
           <div className="text-2xl sm:text-[30px] font-bold text-[#F5B800] leading-none tabular-nums">
             {activeCount}
           </div>
         </div>
 
         <div className="bg-white rounded-2xl px-3.5 py-3.5 sm:px-5 sm:py-4 border border-gray-200/80 min-w-0 flex flex-col justify-between">
-          <div className="text-xs font-medium text-gray-500 mb-1 truncate">Assessments due</div>
+          <div className="text-xs font-medium text-gray-500 mb-1.5 truncate">Assessments due</div>
           <div className="text-2xl sm:text-[30px] font-bold text-[#111827] leading-none tabular-nums">
             {assessmentsDueCount}
           </div>
         </div>
 
         <div className="bg-white rounded-2xl px-3.5 py-3.5 sm:px-5 sm:py-4 border border-gray-200/80 min-w-0 flex flex-col justify-between">
-          <div className="text-xs font-medium text-gray-500 mb-1 truncate">Workouts this week</div>
+          <div className="text-xs font-medium text-gray-500 mb-1.5 truncate">
+            Workouts this week
+          </div>
           <div className="text-2xl sm:text-[30px] font-bold text-[#111827] leading-none tabular-nums">
             {weekDone}
             <span className="text-sm sm:text-base text-gray-400 font-semibold">/{weekTotal}</span>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Empty Workspace State (brand-new coach with zero clients) */}
       {clients.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200/80 py-14 px-6 text-center">
           <p className="text-sm text-gray-600 max-w-md mx-auto mb-5 leading-relaxed">
-            No clients yet. Tap “Add client” and enter their email — they’ll use it to create their account.
+            No clients yet. Tap “Add client” and enter their email — they’ll use it to create their
+            account.
           </p>
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="min-h-[44px] inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add your first client</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsAddModalOpen(true)}
+              className="min-h-[44px] inline-flex items-center justify-center gap-2 bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add your first client</span>
+            </button>
+            {showTestClientButton && onCreateTestClient && (
+              <button
+                type="button"
+                onClick={onCreateTestClient}
+                className="min-h-[44px] px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-[#111827] cursor-pointer"
+              >
+                Load sample client
+              </button>
+            )}
+          </div>
         </div>
       ) : (
-        /* Responsive Master-Detail Grid:
-           - Mobile (< 768px): stacked list-first -> detail-second with Back button
-           - Tablet / Laptop / Desktop (>= 768px): stable two-column master-detail */
-        <div className="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)] lg:grid-cols-[276px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)] gap-4 lg:gap-6 items-start">
-          {/* =================================================================
-              LEFT PANEL — COMPACT SEARCHABLE CLIENT LIST
-             ================================================================= */}
-          <section
-            aria-label="Client list"
-            className={`min-w-0 flex-col bg-white rounded-2xl border border-gray-200/80 overflow-hidden ${
-              mobileDetailOpen ? 'hidden md:flex' : 'flex'
-            }`}
-          >
-            {/* Search + Optional Active/Archived Filter */}
-            <div className="p-3.5 border-b border-gray-100 space-y-2.5">
-              <div className="relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search clients..."
-                  aria-label="Search clients"
-                  className="w-full min-h-[44px] bg-[#F7F8FA] border border-gray-200/80 rounded-xl pl-10 pr-9 py-2 text-base sm:text-sm text-[#111827] placeholder:text-gray-400 focus:bg-white focus:outline-none focus:border-[#111827] transition-colors"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    aria-label="Clear search"
-                    className="w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-[#111827] absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-
-              {archivedClients.length > 0 && (
-                <div
-                  className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#F3F4F6]"
-                  role="tablist"
-                  aria-label="Client list filter"
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={listFilter === 'active'}
-                    onClick={() => setListFilter('active')}
-                    className={`min-h-[36px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
-                      listFilter === 'active'
-                        ? 'bg-white text-[#111827] shadow-2xs'
-                        : 'text-gray-600 hover:text-[#111827]'
-                    }`}
-                  >
-                    Active ({activeClients.length})
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={listFilter === 'archived'}
-                    onClick={() => setListFilter('archived')}
-                    className={`min-h-[36px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
-                      listFilter === 'archived'
-                        ? 'bg-white text-[#111827] shadow-2xs'
-                        : 'text-gray-600 hover:text-[#111827]'
-                    }`}
-                  >
-                    Archived ({archivedClients.length})
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Compact Client Rows */}
-            <div className="divide-y divide-gray-100 md:max-h-[calc(100dvh-260px)] md:overflow-y-auto">
-              {filteredClients.length === 0 ? (
-                <div className="py-10 px-4 text-center">
-                  <p className="text-sm text-gray-500 mb-3">
-                    {searchQuery
-                      ? `No clients match "${searchQuery}".`
-                      : listFilter === 'archived'
-                        ? 'No archived clients.'
-                        : 'No active clients.'}
-                  </p>
+        <>
+          {/* 3. Main Content Area — Compact Client List (Left) + Selected Client Details (Right) */}
+          <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] lg:grid-cols-[296px_minmax(0,1fr)] xl:grid-cols-[336px_minmax(0,1fr)] gap-4 lg:gap-6 items-start">
+            {/* LEFT PANEL — COMPACT CLIENT LIST */}
+            <section
+              aria-label="Client list"
+              className={`min-w-0 flex-col bg-white rounded-2xl border border-gray-200/80 overflow-hidden ${
+                mobileDetailOpen ? 'hidden md:flex' : 'flex'
+              }`}
+            >
+              {/* Inline Search + Optional Archived Switcher (only shown when archived clients exist) */}
+              <div className="p-3 border-b border-gray-100 space-y-2.5">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search clients..."
+                    aria-label="Search clients"
+                    className="w-full min-h-[44px] bg-[#F7F8FA] border border-gray-200/80 rounded-xl pl-10 pr-9 py-2 text-base sm:text-sm text-[#111827] placeholder:text-gray-400 focus:bg-white focus:outline-none focus:border-[#111827] transition-colors"
+                  />
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => setSearchQuery('')}
-                      className="min-h-[44px] px-3 text-xs font-semibold text-[#111827] underline cursor-pointer"
+                      aria-label="Clear search"
+                      className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-[#111827] absolute right-1 top-1/2 -translate-y-1/2 cursor-pointer"
                     >
-                      Clear search
+                      <X className="w-4 h-4" />
                     </button>
                   )}
                 </div>
-              ) : (
-                filteredClients.map((client) => {
-                  const isSelected = activeSelection?.id === client.id;
-                  const status = getClientStatus(client, joinedIds);
-                  return (
+
+                {archivedClients.length > 0 && (
+                  <div
+                    className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#F3F4F6]"
+                    role="tablist"
+                    aria-label="Client list filter"
+                  >
                     <button
-                      key={client.id}
                       type="button"
-                      onClick={() => handleRowClick(client)}
-                      onDoubleClick={() => onSelectClient(client.id, 'exercises')}
-                      aria-current={isSelected ? 'true' : undefined}
-                      className={`w-full min-h-[68px] text-left px-3.5 py-3 flex items-center justify-between gap-3 transition-colors cursor-pointer ${
-                        isSelected
-                          ? 'bg-[#F3F4F6] ring-1 ring-inset ring-[#111827]/12'
-                          : 'bg-white hover:bg-[#F7F8FA]'
+                      role="tab"
+                      aria-selected={listFilter === 'active'}
+                      onClick={() => setListFilter('active')}
+                      className={`min-h-[36px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
+                        listFilter === 'active'
+                          ? 'bg-white text-[#111827] shadow-2xs'
+                          : 'text-gray-600 hover:text-[#111827]'
                       }`}
                     >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <ClientAvatar name={client.name} photoUrl={client.photoUrl} size="sm" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-2 min-w-0">
-                            <span className="text-sm font-semibold text-[#111827] truncate">
-                              {client.name}
-                            </span>
-                            <span
-                              className={`text-xs font-medium whitespace-nowrap shrink-0 ${status.textClass}`}
-                            >
-                              {status.label}
-                            </span>
-                          </div>
-                          <div className="text-xs text-gray-500 truncate mt-0.5 tabular-nums">
-                            Phase {client.phaseNumber} · {client.phaseName}
-                            {client.adherenceTotal > 0
-                              ? ` · ${client.adherenceCompleted}/${client.adherenceTotal} wk`
-                              : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <ChevronRight
-                        className={`w-4 h-4 shrink-0 transition-colors ${
-                          isSelected ? 'text-[#111827]' : 'text-gray-300'
-                        }`}
-                        aria-hidden="true"
-                      />
+                      Active ({activeClients.length})
                     </button>
-                  );
-                })
-              )}
-            </div>
-          </section>
-
-          {/* =================================================================
-              RIGHT PANEL — SELECTED CLIENT CONTEXTUAL DETAIL & ACTIONS
-             ================================================================= */}
-          <section
-            aria-label="Selected client details"
-            className={`min-w-0 flex-col bg-white rounded-2xl border border-gray-200/80 ${
-              mobileDetailOpen ? 'flex' : 'hidden md:flex'
-            }`}
-          >
-            {!activeSelection ? (
-              <div className="py-16 px-6 text-center">
-                <p className="text-sm text-gray-500">
-                  Select a client from the list to view details and actions.
-                </p>
-              </div>
-            ) : (
-              <div className="p-4 sm:p-6 min-w-0">
-                {/* Mobile Back Navigation */}
-                <div className="md:hidden pb-3 mb-4 border-b border-gray-100 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setMobileDetailOpen(false)}
-                    className="min-h-[44px] -ml-1.5 px-2.5 inline-flex items-center gap-1.5 rounded-xl text-sm font-semibold text-[#111827] hover:bg-gray-100 transition-colors cursor-pointer"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Back to clients</span>
-                  </button>
-                  {selectedStatus && (
-                    <span className={`text-xs font-semibold ${selectedStatus.textClass}`}>
-                      {selectedStatus.label}
-                    </span>
-                  )}
-                </div>
-
-                {/* Archived / Demo Notice */}
-                {activeSelection.archived && (
-                  <div className="mb-5 px-4 py-3 rounded-xl bg-[#F7F8FA] border border-gray-200/80 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-gray-600">
-                      This client is archived and hidden from your active roster.
-                    </span>
-                    {onUpdateClient && (
-                      <button
-                        type="button"
-                        onClick={() => handleToggleArchive(activeSelection)}
-                        className="min-h-[36px] px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs font-semibold text-[#111827] hover:bg-gray-50 inline-flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Restore Client</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {activeSelection.isTestClient && (
-                  <div className="mb-5 px-4 py-2.5 rounded-xl bg-[#FEF3C7]/70 border border-[#F5B800]/30 text-xs font-semibold text-[#92400E]">
-                    DEMO — NOT REAL · Sample client for testing workflows
-                  </div>
-                )}
-
-                {/* Identity + Contextual Action Bar */}
-                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4 pb-6 border-b border-gray-100">
-                  <div className="flex items-start gap-3.5 min-w-0">
-                    <ClientAvatar
-                      name={activeSelection.name}
-                      photoUrl={activeSelection.photoUrl}
-                      size="lg"
-                    />
-                    <div className="min-w-0 pt-0.5">
-                      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 min-w-0">
-                        <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-[#111827] truncate">
-                          {activeSelection.name}
-                        </h2>
-                        {selectedStatus && (
-                          <span className={`text-xs font-semibold ${selectedStatus.textClass}`}>
-                            {selectedStatus.label}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-500 mt-1 break-words">
-                        {activeSelection.email || 'No email set'}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1 tabular-nums">
-                        Week {activeSelection.currentWeek} · Phase {activeSelection.phaseNumber} ·{' '}
-                        {activeSelection.phaseName}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Clean Action Button Group + Three-Dot Overflow Menu */}
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => onSelectClient(activeSelection.id, 'exercises')}
-                      className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                      role="tab"
+                      aria-selected={listFilter === 'archived'}
+                      onClick={() => setListFilter('archived')}
+                      className={`min-h-[36px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
+                        listFilter === 'archived'
+                          ? 'bg-white text-[#111827] shadow-2xs'
+                          : 'text-gray-600 hover:text-[#111827]'
+                      }`}
                     >
-                      <Eye className="w-4 h-4" />
-                      <span>View</span>
+                      Archived ({archivedClients.length})
                     </button>
-
-                    {selectedUnjoined && onUpdateClient && (
-                      <button
-                        type="button"
-                        onClick={() => setInviteFor(activeSelection.id)}
-                        className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>{selectedInviteButtonLabel}</span>
-                      </button>
-                    )}
-
-                    {onUpdateClient && !selectedUnjoined && (
-                      <button
-                        type="button"
-                        onClick={() => setInviteFor(activeSelection.id)}
-                        className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-[#111827] text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        <Pencil className="w-3.5 h-3.5 text-gray-500" />
-                        <span>Edit Client</span>
-                      </button>
-                    )}
-
-                    <ClientActionMenu
-                      clientName={activeSelection.name}
-                      isArchived={Boolean(activeSelection.archived)}
-                      isTestClient={Boolean(activeSelection.isTestClient)}
-                      showInvite={Boolean(onUpdateClient && !activeSelection.isTestClient)}
-                      inviteLabel={
-                        activeSelection.invitedAt && selectedUnjoined
-                          ? 'Resend Invite'
-                          : selectedUnjoined
-                            ? 'Invite'
-                            : 'Invite Link'
-                      }
-                      onView={() => onSelectClient(activeSelection.id, 'exercises')}
-                      onEdit={onUpdateClient ? () => setInviteFor(activeSelection.id) : undefined}
-                      onInvite={
-                        onUpdateClient && !activeSelection.isTestClient
-                          ? () => setInviteFor(activeSelection.id)
-                          : undefined
-                      }
-                      onToggleArchive={
-                        onUpdateClient && !activeSelection.isTestClient
-                          ? () => handleToggleArchive(activeSelection)
-                          : undefined
-                      }
-                      onDelete={
-                        activeSelection.isTestClient || onDeleteClient
-                          ? () => {
-                              if (!activeSelection.isTestClient && !permanentDeleteEnabled) return;
-                              setDeleteTargetId(activeSelection.id);
-                            }
-                          : undefined
-                      }
-                      deleteDisabled={!activeSelection.isTestClient && !permanentDeleteEnabled}
-                      deleteDisabledReason="Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead."
-                    />
                   </div>
-                </div>
+                )}
+              </div>
 
-                {/* Contextual Summary Metrics (flat, hairline-separated, tabular numerals) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 py-5 border-b border-gray-100">
-                  <div className="min-w-0">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-medium text-gray-500">Weekly adherence</span>
-                      <span className="text-xs font-semibold text-[#111827] tabular-nums">
-                        {activeSelection.adherenceCompleted}/{activeSelection.adherenceTotal} sessions
-                      </span>
-                    </div>
-                    <div
-                      className="flex items-center gap-1.5 w-full"
-                      title={`${activeSelection.adherenceCompleted} of ${activeSelection.adherenceTotal} sessions completed`}
+              {/* Compact Client Rows */}
+              <div className="divide-y divide-gray-100 md:max-h-[calc(100dvh-260px)] md:overflow-y-auto">
+                {filteredClients.length === 0 ? (
+                  <div className="py-10 px-4 text-center">
+                    <p className="text-sm text-gray-500 mb-3">
+                      {searchQuery
+                        ? `No clients match "${searchQuery}".`
+                        : listFilter === 'archived'
+                          ? 'No archived clients.'
+                          : 'No active clients.'}
+                    </p>
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="min-h-[44px] px-3 text-xs font-semibold text-[#111827] underline cursor-pointer"
+                      >
+                        Clear search
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  filteredClients.map((client) => {
+                    const isSelected = activeSelection?.id === client.id;
+                    const status = getClientStatus(client, joinedIds);
+                    return (
+                      <button
+                        key={client.id}
+                        type="button"
+                        onClick={() => handleRowClick(client)}
+                        onDoubleClick={() => onSelectClient(client.id, 'exercises')}
+                        aria-current={isSelected ? 'true' : undefined}
+                        className={`w-full min-h-[68px] text-left px-3.5 py-3 flex items-center justify-between gap-3 transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#F3F4F6] ring-1 ring-inset ring-[#111827]/10'
+                            : 'bg-white hover:bg-[#F7F8FA]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <ClientAvatar name={client.name} photoUrl={client.photoUrl} size="sm" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2 min-w-0">
+                              <span className="text-sm font-semibold text-[#111827] truncate">
+                                {client.name}
+                              </span>
+                              <span
+                                className={`text-xs font-medium whitespace-nowrap shrink-0 ${status.textClass}`}
+                              >
+                                {status.label}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500 truncate mt-0.5 tabular-nums">
+                              Phase {client.phaseNumber} · {client.phaseName}
+                              {client.adherenceTotal > 0
+                                ? ` · ${client.adherenceCompleted}/${client.adherenceTotal} wk`
+                                : ''}
+                            </div>
+                          </div>
+                        </div>
+                        <ChevronRight
+                          className={`w-4 h-4 shrink-0 transition-colors ${
+                            isSelected ? 'text-[#111827]' : 'text-gray-300'
+                          }`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+
+            {/* RIGHT PANEL — SELECTED CLIENT DETAILS */}
+            <section
+              aria-label="Selected client details"
+              className={`min-w-0 flex-col bg-white rounded-2xl border border-gray-200/80 ${
+                mobileDetailOpen ? 'flex' : 'hidden md:flex'
+              }`}
+            >
+              {!activeSelection || !selectedSnapshot ? (
+                <div className="py-16 px-6 text-center">
+                  <p className="text-sm text-gray-500">
+                    Select a client from the list to view details and open their workspace.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-4 sm:p-6 min-w-0">
+                  {/* Mobile Back Navigation */}
+                  <div className="md:hidden pb-3 mb-4 border-b border-gray-100 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setMobileDetailOpen(false)}
+                      className="min-h-[44px] -ml-1.5 px-2.5 inline-flex items-center gap-1.5 rounded-xl text-sm font-semibold text-[#111827] hover:bg-gray-100 transition-colors cursor-pointer"
                     >
-                      {activeSelection.adherenceTotal > 0 ? (
-                        Array.from({ length: activeSelection.adherenceTotal }).map((_, idx) => (
-                          <div
-                            key={idx}
-                            className={`h-2.5 flex-1 rounded-sm transition-colors ${
-                              idx < activeSelection.adherenceCompleted
-                                ? 'bg-[#FFC809]'
-                                : 'bg-[#E5E7EB]'
-                            }`}
-                          />
-                        ))
-                      ) : (
-                        <div className="text-xs text-gray-400">No workouts scheduled this week</div>
+                      <ArrowLeft className="w-4 h-4" />
+                      <span>Back to clients</span>
+                    </button>
+                    {selectedStatus && (
+                      <span className={`text-xs font-semibold ${selectedStatus.textClass}`}>
+                        {selectedStatus.label}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Archived / Demo Notices */}
+                  {activeSelection.archived && (
+                    <div className="mb-5 px-4 py-3 rounded-xl bg-[#F7F8FA] border border-gray-200/80 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-gray-600">
+                        This client is archived and hidden from your active roster.
+                      </span>
+                      {onUpdateClient && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleArchive(activeSelection)}
+                          className="min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs font-semibold text-[#111827] hover:bg-gray-50 inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Restore Client</span>
+                        </button>
                       )}
                     </div>
+                  )}
+
+                  {activeSelection.isTestClient && (
+                    <div className="mb-5 px-4 py-2.5 rounded-xl bg-[#FEF3C7]/70 border border-[#F5B800]/30 text-xs font-semibold text-[#92400E]">
+                      DEMO — NOT REAL · Sample client for testing workflows
+                    </div>
+                  )}
+
+                  {/* Identity + Clean Action Group */}
+                  <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4 pb-6 border-b border-gray-100">
+                    <div className="flex items-start gap-3.5 min-w-0">
+                      <ClientAvatar
+                        name={activeSelection.name}
+                        photoUrl={activeSelection.photoUrl}
+                        size="lg"
+                      />
+                      <div className="min-w-0 pt-0.5">
+                        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 min-w-0">
+                          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-[#111827] truncate">
+                            {activeSelection.name}
+                          </h2>
+                          {selectedStatus && (
+                            <span className={`text-xs font-semibold ${selectedStatus.textClass}`}>
+                              {selectedStatus.label}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500 mt-1 break-words">
+                          {activeSelection.email || 'No email set'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1 tabular-nums">
+                          Week {activeSelection.currentWeek} · Phase {activeSelection.phaseNumber} ·{' '}
+                          {activeSelection.phaseName}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onSelectClient(activeSelection.id, 'exercises')}
+                        className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        <Eye className="w-4 h-4" />
+                        <span>View</span>
+                      </button>
+
+                      {selectedUnjoined && onUpdateClient && (
+                        <button
+                          type="button"
+                          onClick={() => setInviteFor(activeSelection.id)}
+                          className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{selectedInviteButtonLabel}</span>
+                        </button>
+                      )}
+
+                      {onUpdateClient && !selectedUnjoined && (
+                        <button
+                          type="button"
+                          onClick={() => setInviteFor(activeSelection.id)}
+                          className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-[#111827] text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-gray-500" />
+                          <span>Edit Client</span>
+                        </button>
+                      )}
+
+                      <ClientActionMenu
+                        clientName={activeSelection.name}
+                        isArchived={Boolean(activeSelection.archived)}
+                        isTestClient={Boolean(activeSelection.isTestClient)}
+                        showInvite={Boolean(onUpdateClient && !activeSelection.isTestClient)}
+                        inviteLabel={
+                          activeSelection.invitedAt && selectedUnjoined
+                            ? 'Resend Invite'
+                            : selectedUnjoined
+                              ? 'Invite'
+                              : 'Invite Link'
+                        }
+                        onView={() => onSelectClient(activeSelection.id, 'exercises')}
+                        onEdit={onUpdateClient ? () => setInviteFor(activeSelection.id) : undefined}
+                        onInvite={
+                          onUpdateClient && !activeSelection.isTestClient
+                            ? () => setInviteFor(activeSelection.id)
+                            : undefined
+                        }
+                        onToggleArchive={
+                          onUpdateClient && !activeSelection.isTestClient
+                            ? () => handleToggleArchive(activeSelection)
+                            : undefined
+                        }
+                        onDelete={
+                          activeSelection.isTestClient || onDeleteClient
+                            ? () => {
+                                if (!activeSelection.isTestClient && !permanentDeleteEnabled) return;
+                                setDeleteTargetId(activeSelection.id);
+                              }
+                            : undefined
+                        }
+                        deleteDisabled={!activeSelection.isTestClient && !permanentDeleteEnabled}
+                        deleteDisabledReason="Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead."
+                      />
+                    </div>
                   </div>
 
-                  <div className="min-w-0 flex flex-col justify-between">
-                    <span className="text-xs font-medium text-gray-500 mb-1">Next assessment</span>
-                    <div className="text-sm font-semibold text-[#111827] tabular-nums">
-                      <span
-                        className={
-                          activeSelection.nextAssessmentDays <= 5 ? 'text-[#B45309]' : 'text-[#111827]'
-                        }
+                  {/* Clean Profile Summary Row (Real Data Only, Zero Nested Cards) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 py-5 border-b border-gray-100">
+                    <div className="min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-xs font-medium text-gray-500">Weekly workouts</span>
+                        <span className="text-xs font-semibold text-[#111827] tabular-nums">
+                          {activeSelection.adherenceCompleted}/{activeSelection.adherenceTotal}
+                        </span>
+                      </div>
+                      <div
+                        className="flex items-center gap-1.5 w-full"
+                        title={`${activeSelection.adherenceCompleted} of ${activeSelection.adherenceTotal} sessions completed`}
                       >
-                        In {activeSelection.nextAssessmentDays} days
-                      </span>
-                      <span className="text-xs font-normal text-gray-500 ml-2">
-                        · {(activeSelection.assessments ?? []).length} completed
-                      </span>
+                        {activeSelection.adherenceTotal > 0 ? (
+                          Array.from({ length: activeSelection.adherenceTotal }).map((_, idx) => (
+                            <div
+                              key={idx}
+                              className={`h-2.5 flex-1 rounded-sm transition-colors ${
+                                idx < activeSelection.adherenceCompleted
+                                  ? 'bg-[#FFC809]'
+                                  : 'bg-[#E5E7EB]'
+                              }`}
+                            />
+                          ))
+                        ) : (
+                          <div className="text-xs text-gray-400">None scheduled</div>
+                        )}
+                      </div>
+                      {selectedSnapshot.lastCompletedWorkoutDate && (
+                        <div className="text-xs text-gray-500 mt-2 truncate tabular-nums">
+                          Last logged {formatDate(selectedSnapshot.lastCompletedWorkoutDate)}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <span className="text-xs font-medium text-gray-500">Next assessment</span>
+                      <div className="text-sm font-semibold text-[#111827] mt-1.5 tabular-nums">
+                        <span
+                          className={
+                            activeSelection.nextAssessmentDays <= 5
+                              ? 'text-[#B45309]'
+                              : 'text-[#111827]'
+                          }
+                        >
+                          {activeSelection.nextAssessmentDays <= 0
+                            ? 'Due now'
+                            : `In ${activeSelection.nextAssessmentDays} days`}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1 truncate tabular-nums">
+                        {selectedSnapshot.completedAssessments} completed
+                        {selectedSnapshot.lastAssessmentDate
+                          ? ` · ${formatDate(selectedSnapshot.lastAssessmentDate)}`
+                          : ''}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <span className="text-xs font-medium text-gray-500">Body &amp; nutrition</span>
+                      <div className="text-sm font-semibold text-[#111827] mt-1.5 truncate tabular-nums">
+                        {selectedSnapshot.weightKg !== null ? (
+                          <>
+                            {formatWeight(selectedSnapshot.weightKg)}
+                            {selectedSnapshot.bodyFatPercent !== null
+                              ? ` · ${selectedSnapshot.bodyFatPercent}% BF`
+                              : ''}
+                          </>
+                        ) : (
+                          <span className="text-gray-400 font-medium">Not recorded</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1 truncate tabular-nums">
+                        {selectedSnapshot.nutritionCalories
+                          ? `${selectedSnapshot.nutritionCalories} kcal target`
+                          : 'Nutrition target not set'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct Workspace Navigation (Single Action Per Section) */}
+                  <div className="pt-5">
+                    <div className="text-xs font-medium text-gray-500 mb-3">Open workspace</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {workspaceSections.map((sec) => {
+                        const Icon = sec.icon;
+                        return (
+                          <button
+                            key={sec.id}
+                            type="button"
+                            aria-label={sec.label}
+                            onClick={() => onSelectClient(activeSelection.id, sec.id)}
+                            className="min-h-[58px] min-w-0 px-3.5 py-2.5 rounded-xl border border-gray-200/80 bg-[#F7F8FA]/60 hover:bg-[#F3F4F6] hover:border-gray-300 text-left flex items-center gap-3 transition-colors cursor-pointer"
+                          >
+                            <Icon className="w-4 h-4 text-[#374151] shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-[#111827] truncate">
+                                {sec.label}
+                              </div>
+                              <div className="text-[11px] text-gray-500 truncate tabular-nums">
+                                {sec.hint}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
-
-                {/* Quick Jump Into Client Workspace Sections */}
-                <div className="pt-5">
-                  <div className="text-xs font-medium text-gray-500 mb-3">Open workspace</div>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
-                    {QUICK_SECTIONS.map((sec) => {
-                      const Icon = sec.icon;
-                      return (
-                        <button
-                          key={sec.id}
-                          type="button"
-                          aria-label={sec.label}
-                          onClick={() => onSelectClient(activeSelection.id, sec.id)}
-                          className="min-h-[56px] min-w-0 px-3.5 py-2.5 rounded-xl border border-gray-200/80 bg-[#F7F8FA]/60 hover:bg-[#F3F4F6] hover:border-gray-300 text-left flex items-center gap-3 transition-colors cursor-pointer"
-                        >
-                          <Icon className="w-4 h-4 text-[#374151] shrink-0" />
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-[#111827] truncate">
-                              {sec.label}
-                            </div>
-                            <div className="text-[11px] text-gray-500 truncate">{sec.hint}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
+              )}
+            </section>
+          </div>
+        </>
       )}
 
       {/* Edit & Invite Modal */}
@@ -777,9 +868,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
             <form onSubmit={handleCreateClient} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">
-                  Full Name
-                </label>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Full Name</label>
                 <input
                   type="text"
                   required
@@ -827,7 +916,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       : newPhase === '3-Strength'
                         ? 'Strength: build progressively loaded strength on a stable movement foundation.'
                         : 'Performance: refine sport- or goal-specific performance once the client is ready.'}{' '}
-                  Select the starting phase using the client’s assessment, training history, goals and your coaching judgment.
+                  Select the starting phase using the client’s assessment, training history, goals
+                  and your coaching judgment.
                 </p>
               </div>
 

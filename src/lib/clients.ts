@@ -1,5 +1,6 @@
-import { ClientProfile, MonthlyReportData } from '../types';
+import { ClientProfile, ClientSection, MonthlyReportData } from '../types';
 import { WEIGHT_UNIT } from './units';
+import { addDays, startOfWeek, todayISO } from './workouts';
 import { alternateGoogleMailDomain, emailCooldownKey } from '../../supabase/functions/_shared/google-email-alias';
 
 const zero = (unit: string) => ({ week0: 0, current: 0, unit });
@@ -115,5 +116,185 @@ export function createClientProfile(input: {
     workouts: [],
     progressHistory: [],
     monthlyReports: { 1: emptyReport(1), 2: emptyReport(2), 3: emptyReport(3) }
+  };
+}
+
+export type AttentionSeverity = 'urgent' | 'warning';
+
+export type AttentionReasonCode =
+  | 'pain_reported'
+  | 'missed_workouts'
+  | 'assessment_missing'
+  | 'assessment_due'
+  | 'low_adherence'
+  | 'no_workouts';
+
+export interface ClientAttentionReason {
+  code: AttentionReasonCode;
+  severity: AttentionSeverity;
+  label: string;
+  targetSection: ClientSection;
+}
+
+export interface ClientAttentionSummary {
+  clientId: string;
+  severity: AttentionSeverity;
+  reasons: ClientAttentionReason[];
+  primarySection: ClientSection;
+}
+
+/**
+ * Evaluates whether an active client needs coach attention based solely on
+ * real available assessment and workout data (never fabricated metrics).
+ */
+export function evaluateClientAttention(
+  client: ClientProfile,
+  today: string = todayISO()
+): ClientAttentionSummary | null {
+  if (client.archived) return null;
+
+  const reasons: ClientAttentionReason[] = [];
+  const workouts = client.workouts ?? [];
+  const assessments = client.assessments ?? [];
+  const fourteenDaysAgo = addDays(today, -14);
+  const weekStart = startOfWeek(today);
+
+  // 1. Pain reported in a workout logged within the last 14 days
+  const recentWorkoutsDesc = [...workouts]
+    .filter((w) => w.date >= fourteenDaysAgo && w.date <= today)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  let painExercise: string | null = null;
+  for (const w of recentWorkoutsDesc) {
+    const painBlock = w.blocks.find((b) => b.pain === true);
+    if (painBlock) {
+      painExercise = painBlock.name;
+      break;
+    }
+  }
+  if (painExercise) {
+    reasons.push({
+      code: 'pain_reported',
+      severity: 'urgent',
+      label: `Pain reported · ${painExercise}`,
+      targetSection: 'exercises'
+    });
+  }
+
+  // 2. Missed workouts in the last 14 days or overdue planned sessions this week
+  const missedCount = workouts.filter(
+    (w) =>
+      (w.status === 'missed' && w.date >= fourteenDaysAgo && w.date <= today) ||
+      (w.status === 'planned' && w.date >= weekStart && w.date < today)
+  ).length;
+
+  if (missedCount > 0) {
+    reasons.push({
+      code: 'missed_workouts',
+      severity: 'urgent',
+      label: `${missedCount} missed ${missedCount === 1 ? 'workout' : 'workouts'}`,
+      targetSection: 'exercises'
+    });
+  }
+
+  // 3. Assessment due soon or no completed assessment recorded yet
+  if (assessments.length === 0 && client.nextAssessmentDays <= 0) {
+    reasons.push({
+      code: 'assessment_missing',
+      severity: 'warning',
+      label: 'Initial assessment needed',
+      targetSection: 'assessment'
+    });
+  } else if (client.nextAssessmentDays <= 0) {
+    reasons.push({
+      code: 'assessment_due',
+      severity: 'warning',
+      label: 'Assessment due now',
+      targetSection: 'assessment'
+    });
+  } else if (client.nextAssessmentDays <= 5) {
+    reasons.push({
+      code: 'assessment_due',
+      severity: 'warning',
+      label: `Assessment in ${client.nextAssessmentDays}d`,
+      targetSection: 'assessment'
+    });
+  }
+
+  // 4. Low weekly workout adherence or no upcoming workouts scheduled
+  if (client.adherenceTotal >= 2 && client.adherenceCompleted / client.adherenceTotal < 0.5) {
+    reasons.push({
+      code: 'low_adherence',
+      severity: 'warning',
+      label: `${client.adherenceCompleted}/${client.adherenceTotal} workouts this week`,
+      targetSection: 'exercises'
+    });
+  } else if (client.adherenceTotal === 0 && !workouts.some((w) => w.date >= today)) {
+    reasons.push({
+      code: 'no_workouts',
+      severity: 'warning',
+      label: 'No workouts scheduled',
+      targetSection: 'exercises'
+    });
+  }
+
+  if (reasons.length === 0) return null;
+
+  reasons.sort((a, b) => {
+    if (a.severity === b.severity) return 0;
+    return a.severity === 'urgent' ? -1 : 1;
+  });
+
+  const severity: AttentionSeverity = reasons.some((r) => r.severity === 'urgent')
+    ? 'urgent'
+    : 'warning';
+
+  return {
+    clientId: client.id,
+    severity,
+    reasons,
+    primarySection: reasons[0].targetSection
+  };
+}
+
+export interface ClientSnapshotStats {
+  completedWorkouts: number;
+  totalWorkouts: number;
+  lastCompletedWorkoutDate: string | null;
+  completedAssessments: number;
+  lastAssessmentDate: string | null;
+  goalsCount: number;
+  notesCount: number;
+  progressPointsCount: number;
+  nutritionCalories: number | null;
+  nutritionProtein: number | null;
+  weightKg: number | null;
+  bodyFatPercent: number | null;
+}
+
+/** Extracts factual summary values from an existing ClientProfile without fabricating missing data. */
+export function getClientSnapshotStats(client: ClientProfile): ClientSnapshotStats {
+  const workouts = client.workouts ?? [];
+  const completed = workouts
+    .filter((w) => w.status === 'completed')
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const assessments = [...(client.assessments ?? [])].sort((a, b) => b.date.localeCompare(a.date));
+
+  return {
+    completedWorkouts: completed.length,
+    totalWorkouts: workouts.length,
+    lastCompletedWorkoutDate: completed[0]?.date ?? null,
+    completedAssessments: assessments.length,
+    lastAssessmentDate: assessments[0]?.date ?? null,
+    goalsCount: (client.goals ?? []).length,
+    notesCount: (client.coachNotes ?? []).length,
+    progressPointsCount: (client.progressHistory ?? []).length,
+    nutritionCalories:
+      client.nutrition?.calories && client.nutrition.calories > 0 ? client.nutrition.calories : null,
+    nutritionProtein:
+      client.nutrition?.protein && client.nutrition.protein > 0 ? client.nutrition.protein : null,
+    weightKg: client.inBody?.weight > 0 ? client.inBody.weight : null,
+    bodyFatPercent: client.inBody?.bodyFatPercent > 0 ? client.inBody.bodyFatPercent : null
   };
 }
