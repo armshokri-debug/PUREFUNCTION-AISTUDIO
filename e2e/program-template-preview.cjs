@@ -490,6 +490,7 @@ async function measureOverflow(page) {
   templateGetMode = 'ok';
 
   const toggle = page.getByRole('button', { name: /Show preview|Hide preview/ });
+  const openTemplateActions = async () => page.getByRole('button', { name: 'Template actions' }).click();
   ok((await toggle.getAttribute('aria-expanded')) === 'false', 'preview starts collapsed (aria-expanded=false)');
   ok((await page.locator('#program-template-preview').count()) === 0, 'preview region not rendered initially');
   const toggleBox = await toggle.boundingBox();
@@ -984,7 +985,8 @@ async function measureOverflow(page) {
   const patchCountBeforeCancel = templateDirectPatchCount;
   const dbSnapshotBeforeCancel = JSON.stringify(mock.db.program_templates);
 
-  await page.getByRole('button', { name: 'Edit template' }).click();
+  await openTemplateActions();
+  await page.getByRole('menuitem', { name: 'Edit template' }).click();
   const editor = page.locator('#program-template-editor');
   await editor.waitFor();
   await editor.getByLabel('Edit template name').fill('Cancelled Draft Name');
@@ -999,7 +1001,8 @@ async function measureOverflow(page) {
 
   // 8b. Reopen and verify conflict, permission denial, missing RPC, network, and malformed response preserve draft
   const originalTplSnapshot = JSON.parse(JSON.stringify(savedTplRow.data));
-  await page.getByRole('button', { name: 'Edit template' }).click();
+  await openTemplateActions();
+  await page.getByRole('menuitem', { name: 'Edit template' }).click();
   await editor.waitFor();
   const edName = editor.getByLabel('Edit template name');
   const edSets = editor.getByLabel('Lifecycle Push A · Incline Dumbbell Press sets');
@@ -1138,7 +1141,8 @@ async function measureOverflow(page) {
 
   // 8e. Zero values round-trip on edgeTemplate (tpl-edge)
   await page.getByLabel('Saved template').selectOption('tpl-edge');
-  await page.getByRole('button', { name: 'Edit template' }).click();
+  await openTemplateActions();
+  await page.getByRole('menuitem', { name: 'Edit template' }).click();
   await editor.waitFor();
   const zeroSetsInput = editor.getByLabel('Untitled workout · Zero Load Drill sets');
   const zeroRepsInput = editor.getByLabel('Untitled workout · Zero Load Drill reps');
@@ -1168,7 +1172,8 @@ async function measureOverflow(page) {
 
   // 8f. Editor responsive checks (375, 768, 1024, 1440px) with long text + phone input/button sizes
   await page.getByLabel('Saved template').selectOption('tpl-long');
-  await page.getByRole('button', { name: 'Edit template' }).click();
+  await openTemplateActions();
+  await page.getByRole('menuitem', { name: 'Edit template' }).click();
   await editor.waitFor();
   for (const [w, h] of [
     [375, 812],
@@ -1333,7 +1338,8 @@ async function measureOverflow(page) {
   const dupSelect = page.getByLabel('Saved template');
   await dupSelect.selectOption('tpl-week');
 
-  const dupBtn = page.getByRole('button', { name: 'Duplicate template' });
+  await openTemplateActions();
+  const dupBtn = page.getByRole('menuitem', { name: 'Duplicate template' });
   const dupBtnBox = await dupBtn.boundingBox();
   ok(!!dupBtnBox && dupBtnBox.height >= 44, `duplicate: trigger button height >= 44px (${dupBtnBox ? Math.round(dupBtnBox.height) : 0}px)`);
 
@@ -1359,6 +1365,7 @@ async function measureOverflow(page) {
   ok(JSON.stringify(mock.db.program_templates) === templatesBeforeCancelDup, 'duplicate: Cancel leaves DB untouched');
 
   // 10b. Open with Space -> blank/whitespace-only rejected without inserts
+  await openTemplateActions();
   await dupBtn.focus();
   await page.keyboard.press('Space');
   await dupForm.waitFor();
@@ -1458,7 +1465,8 @@ async function measureOverflow(page) {
   await page.getByRole('button', { name: 'Programs' }).first().click();
   await page.getByLabel('Program for client').selectOption('client-syn-1');
   await dupSelect.selectOption(dupRow.id);
-  await page.getByRole('button', { name: 'Edit template' }).click();
+  await openTemplateActions();
+  await page.getByRole('menuitem', { name: 'Edit template' }).click();
   await editor.waitFor();
   await editor.getByLabel('Edit template name').fill('Independent Edited Copy');
   await editor.getByLabel('Lower Hinge · Romanian Deadlift sets').fill('6');
@@ -1486,7 +1494,8 @@ async function measureOverflow(page) {
 
   // 10f. Responsive widths (375, 768, 1024, 1440px) with long unbroken copy name & phone touch/font checks
   const longCopyName = 'SuperLongUnbrokenDuplicatedProgramTemplateNameWithoutSpaces_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  await page.getByRole('button', { name: 'Duplicate template' }).click();
+  await openTemplateActions();
+  await page.getByRole('menuitem', { name: 'Duplicate template' }).click();
   await dupForm.waitFor();
   await dupForm.getByLabel('Copy name').fill(longCopyName);
 
