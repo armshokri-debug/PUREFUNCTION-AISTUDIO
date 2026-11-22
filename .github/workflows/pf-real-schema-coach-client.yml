@@ -1,0 +1,142 @@
+name: PF synthetic coach-client security on actual schema
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/pf-real-schema-coach-client.yml'
+      - 'scripts/migration/coach-client-isolation.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-actual-schema:
+    if: >-
+      github.event.pull_request.head.repo.full_name == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
+      github.event.pull_request.head.ref == 'qa/coach-client-isolation-20261122'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+      - name: Start clean local Supabase in Docker, never production
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "PF_LOCAL_DIR=$RUNNER_TEMP/pf-schema-local" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/pf-schema-local"
+          cd "$RUNNER_TEMP/pf-schema-local"
+          supabase init
+          test ! -d supabase/migrations || test -z "$(find supabase/migrations -name '*.sql' -print -quit)"
+          supabase start
+          supabase status -o json > "$RUNNER_TEMP/pf-local-status.json"
+          echo 'PASS: isolated Supabase Docker started with no production data'
+
+      - name: Install PostgreSQL 17 CLI for schema-only export and restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends -qq curl ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends -qq postgresql-client-17
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+          test -x /usr/lib/postgresql/17/bin/pg_restore
+          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+
+      - name: Export only current Production app DDL (read-only; absolutely no rows)
+        shell: bash
+        env:
+          SOURCE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const u = new URL(process.env.SOURCE_DB_URL || 'postgresql://invalid');
+          assert(['postgresql:','postgres:'].includes(u.protocol));
+          assert(u.hostname === 'db.rugwzvztweiffprkxfdc.supabase.co' ||
+            (u.hostname.endsWith('.pooler.supabase.com') &&
+             u.username.includes('rugwzvztweiffprkxfdc')));
+          assert(u.searchParams.get('sslmode') === 'require');
+          NODE
+          PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000' \
+            pg_dump --dbname="$SOURCE_DB_URL" --schema-only --format=custom \
+              --schema=public --schema=private --no-owner --lock-wait-timeout=30000 \
+              --file "$RUNNER_TEMP/pf-schema-only.dump"
+          test -s "$RUNNER_TEMP/pf-schema-only.dump"
+          echo 'PASS: schema-only DDL exported without user records or storage objects'
+
+      - name: Restore actual app DDL to loopback-only Docker and verify shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_db="$(node -e "let s=require(process.env.RUNNER_TEMP+'/pf-local-status.json'); console.log(s.DB_URL||s.db_url||'')")"
+          node -e "const u=new URL(process.argv[1]);if(!['localhost','127.0.0.1'].includes(u.hostname))process.exit(1)" "$local_db"
+          psql "$local_db" -X -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS private;' >/dev/null
+          pg_restore -l "$RUNNER_TEMP/pf-schema-only.dump" > "$RUNNER_TEMP/pf-ddl.list"
+          awk '!/^[0-9]+;.* SCHEMA - (public|private) /' "$RUNNER_TEMP/pf-ddl.list" > "$RUNNER_TEMP/pf-ddl-filtered.list"
+          if ! pg_restore --dbname="$local_db" --no-owner --no-acl --exit-on-error --single-transaction \
+            --use-list="$RUNNER_TEMP/pf-ddl-filtered.list" "$RUNNER_TEMP/pf-schema-only.dump" \
+            >/dev/null 2>"$RUNNER_TEMP/pf-restore-error.log"; then
+            echo 'BLOCKED: isolated restore failed'
+            if grep -qi 'already exists' "$RUNNER_TEMP/pf-restore-error.log"; then echo 'Category: schema collision'
+            elif grep -qi 'does not exist' "$RUNNER_TEMP/pf-restore-error.log"; then echo 'Category: missing local dependency'
+            elif grep -qi 'permission denied' "$RUNNER_TEMP/pf-restore-error.log"; then echo 'Category: local role/permission mismatch'
+            else echo 'Category: other incompatibility'; fi
+            exit 1
+          fi
+          tables="$(psql "$local_db" -X -At -c "select count(*) from pg_tables where schemaname='public'")"
+          funcs="$(psql "$local_db" -X -At -c "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private')")"
+          policies="$(psql "$local_db" -X -At -c "select count(*) from pg_policies where schemaname='public'")"
+          test "$tables" -ge 18
+          test "$funcs" -ge 43
+          test "$policies" -ge 46
+          rls="$(psql "$local_db" -X -At -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relrowsecurity")"
+          test "$rls" -ge 17
+          echo "PASS: isolated real schema restored (tables=$tables, functions=$funcs, policies=$policies, rls_tables=$rls)"
+
+      - name: Restore cross-schema auth.users profile-link trigger in local Docker only
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_db="$(node -e "let s=require(process.env.RUNNER_TEMP+'/pf-local-status.json'); console.log(s.DB_URL||s.db_url||'')")"
+          node -e "const u=new URL(process.argv[1]);if(!['localhost','127.0.0.1'].includes(u.hostname))process.exit(1)" "$local_db"
+          existing="$(psql "$local_db" -X -tA -c "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='auth' and c.relname='users' and t.tgname='on_auth_user_created' and not t.tgisinternal")"
+          if [[ "$existing" != '0' ]]; then
+            echo 'BLOCKED: local auth hook exists unexpectedly; refuse to overwrite it'
+            exit 1
+          fi
+          # The real Production trigger lives on auth.users, outside the public/private
+          # schema-only dump. Mirror only its verified DDL into ephemeral Docker.
+          psql "$local_db" -X -v ON_ERROR_STOP=1 -c \
+            'CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION private.on_auth_user_created();' >/dev/null
+          echo 'PASS: cross-schema auth.users profile trigger reattached in isolated Docker'
+
+      - name: Check synthetic coach/client ownership, RLS and persistence
+        shell: bash
+        run: node scripts/migration/coach-client-isolation.mjs "$RUNNER_TEMP/pf-local-status.json"
+
+      - name: Destroy isolated database and confidential temporary schema
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "$PF_LOCAL_DIR" && -d "$PF_LOCAL_DIR" ]]; then
+            (cd "$PF_LOCAL_DIR" && supabase stop --no-backup) || true
+            rm -rf "$PF_LOCAL_DIR"
+          fi
+          rm -f "$RUNNER_TEMP/pf-schema-only.dump" "$RUNNER_TEMP/pf-ddl.list" "$RUNNER_TEMP/pf-ddl-filtered.list" "$RUNNER_TEMP/pf-restore-error.log" "$RUNNER_TEMP/pf-local-status.json"
+          echo 'PASS: isolated schema and containers removed'
