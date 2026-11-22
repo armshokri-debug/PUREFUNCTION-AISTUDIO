@@ -109,6 +109,23 @@ jobs:
           test "$rls" -ge 17
           echo "PASS: isolated real schema restored (tables=$tables, functions=$funcs, policies=$policies, rls_tables=$rls)"
 
+      - name: Restore cross-schema auth.users profile-link trigger in local Docker only
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_db="$(node -e "let s=require(process.env.RUNNER_TEMP+'/pf-local-status.json'); console.log(s.DB_URL||s.db_url||'')")"
+          node -e "const u=new URL(process.argv[1]);if(!['localhost','127.0.0.1'].includes(u.hostname))process.exit(1)" "$local_db"
+          existing="$(psql "$local_db" -X -tA -c "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='auth' and c.relname='users' and t.tgname='on_auth_user_created' and not t.tgisinternal")"
+          if [[ "$existing" != '0' ]]; then
+            echo 'BLOCKED: local auth hook exists unexpectedly; refuse to overwrite it'
+            exit 1
+          fi
+          # The real Production trigger lives on auth.users, outside the public/private
+          # schema-only dump. Mirror only its verified DDL into ephemeral Docker.
+          psql "$local_db" -X -v ON_ERROR_STOP=1 -c \
+            'CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION private.on_auth_user_created();' >/dev/null
+          echo 'PASS: cross-schema auth.users profile trigger reattached in isolated Docker'
+
       - name: Check synthetic coach/client ownership, RLS and persistence
         shell: bash
         run: node scripts/migration/coach-client-isolation.mjs "$RUNNER_TEMP/pf-local-status.json"
