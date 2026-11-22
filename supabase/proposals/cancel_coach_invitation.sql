@@ -10,7 +10,6 @@ SET search_path TO ''
 AS $function$
 DECLARE
   addr text := lower(btrim(p_email));
-  removed boolean;
 BEGIN
   IF NOT public.pf_head_coach() THEN
     RAISE EXCEPTION 'Head coach only' USING ERRCODE = '42501';
@@ -33,8 +32,7 @@ BEGIN
   END IF;
 
   DELETE FROM private.coach_allowlist WHERE email = addr;
-  GET DIAGNOSTICS removed = ROW_COUNT;
-  RETURN removed;
+  RETURN FOUND;
 END;
 $function$;
 
