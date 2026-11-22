@@ -1,0 +1,31 @@
+# One-time isolated CI gate: visit only the signed-out public Pure Function site.
+# No deploy, test accounts, DB writes, passwords, API keys, or real emails.
+name: PF public production signed-out smoke (read only)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/pf-production-public-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public-smoke:
+    if: >-
+      github.event.pull_request.head.repo.full_name == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
+      github.event.pull_request.head.ref == 'qa/public-live-smoke-20261122'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium
+      - name: Check live public sign-in, tabs and layout across phone/tablet/desktop
+        run: node e2e/production-smoke.cjs 'https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/'
