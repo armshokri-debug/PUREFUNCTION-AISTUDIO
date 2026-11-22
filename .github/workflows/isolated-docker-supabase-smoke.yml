@@ -1,0 +1,156 @@
+name: Pure Function isolated Docker Supabase smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/isolated-docker-supabase-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+
+      - name: Create entirely isolated project with synthetic Edge Function
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/pf-isolated-docker"
+          mkdir -p "$dir"
+          echo "PF_SMOKE_DIR=$dir" >> "$GITHUB_ENV"
+          cd "$dir"
+          supabase init
+          if [[ -d supabase/migrations ]] && find supabase/migrations -name '*.sql' | grep -q .; then
+            echo 'FAIL: production migrations must not be imported into a synthetic smoke test'
+            exit 1
+          fi
+          mkdir -p supabase/functions/pf-health
+          cat > supabase/functions/pf-health/index.ts <<'TS'
+          Deno.serve(() => new Response('{"ok":true}', { headers: { "Content-Type": "application/json" } }));
+          TS
+
+      - name: Start Docker Supabase without production data or credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PF_SMOKE_DIR"
+          supabase start
+          supabase status -o json > status.json
+          echo 'PASS: isolated Docker Supabase started'
+
+      - name: Start synthetic Edge Function
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PF_SMOKE_DIR"
+          supabase functions serve pf-health --no-verify-jwt > "$RUNNER_TEMP/pf-edge.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/pf-edge.pid"
+          sleep 8
+          kill -0 "$(cat "$RUNNER_TEMP/pf-edge.pid")"
+
+      - name: Validate synthetic Auth, REST/RLS, Realtime, private Storage, Edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v psql >/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client; }
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import { randomUUID } from 'node:crypto';
+          import { createClient } from '@supabase/supabase-js';
+          const s = JSON.parse(readFileSync(process.env.PF_SMOKE_DIR + '/status.json','utf8'));
+          const value = (...keys) => keys.map(k=>s[k]).find(x=>typeof x==='string' && x.length);
+          const url=value('API_URL','api_url'), db=value('DB_URL','db_url');
+          const anon=value('ANON_KEY','anon_key','PUBLISHABLE_KEY','publishable_key');
+          const secret=value('SERVICE_ROLE_KEY','service_role_key','SECRET_KEY','secret_key');
+          for(const target of [url,db]) assert(['localhost','127.0.0.1'].includes(new URL(target).hostname),'Non-local target blocked');
+          assert(anon && secret, 'Local API keys missing');
+          assert(!JSON.stringify(s).includes('rugwzvztweiffprkxfdc'),'Production project blocked');
+          const client = key=>createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+          const admin=client(secret), users=[], bucket='pf-smoke-'+randomUUID().slice(0,8);
+          const check=async job=>{
+            const {data,error}=await job;
+            if(error) throw Error('Local API failure: '+String(error.code||error.status||'unknown'));
+            return data;
+          };
+          const sql=q=>execFileSync('psql',[db,'-X','-v','ON_ERROR_STOP=1','-c',q],{stdio:['ignore','pipe','pipe'],timeout:25000});
+          const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+          async function user(n){
+            const email='pf-smoke-'+n+'-'+bucket+'@example.test', password='SyntheticOnly!9_' + bucket;
+            const made=await check(admin.auth.admin.createUser({email,password,email_confirm:true}));
+            users.push(made.user.id);
+            const c=client(anon);
+            await check(c.auth.signInWithPassword({email,password}));
+            assert.equal((await check(c.auth.getUser())).user.id,made.user.id);
+            return { c,id:made.user.id };
+          }
+          try{
+            const a=await user(1),b=await user(2);
+            console.log('PASS: local Auth sign-in/session');
+            sql('CREATE TABLE public.pf_smoke (id uuid PRIMARY KEY, uid uuid NOT NULL); '+
+              'ALTER TABLE public.pf_smoke ENABLE ROW LEVEL SECURITY; '+
+              'GRANT SELECT,INSERT ON public.pf_smoke TO authenticated; '+
+              'CREATE POLICY own ON public.pf_smoke FOR ALL TO authenticated '+
+              'USING (uid = (SELECT auth.uid())) WITH CHECK (uid = (SELECT auth.uid())); '+
+              "NOTIFY pgrst, 'reload schema';");
+            const id=randomUUID();let inserted=false;
+            for(let n=0;n<12;n++){try{await check(a.c.from('pf_smoke').insert({id,uid:a.id}));inserted=true;break;}catch{await wait(1000);}}
+            assert(inserted,'REST schema reload or INSERT failed');
+            assert.equal((await check(a.c.from('pf_smoke').select('id').eq('id',id))).length,1);
+            assert.equal((await check(b.c.from('pf_smoke').select('id').eq('id',id))).length,0);
+            console.log('PASS: REST queries and cross-user RLS');
+            const ch=a.c.channel('pf-smoke-test');
+            try{await new Promise((resolve,reject)=>{
+              const t=setTimeout(()=>reject(Error('Realtime timeout')),18000);
+              ch.subscribe(x=>{if(x==='SUBSCRIBED'){clearTimeout(t);resolve();}
+                if(x==='CHANNEL_ERROR'||x==='TIMED_OUT'){clearTimeout(t);reject(Error('Realtime unavailable'));}});
+            });}finally{await a.c.removeChannel(ch);}
+            console.log('PASS: Realtime subscription');
+            await check(admin.storage.createBucket(bucket,{public:false}));
+            await check(admin.storage.from(bucket).upload('synthetic.txt',Buffer.from('test-'+bucket),{contentType:'text/plain'}));
+            const signed=await check(admin.storage.from(bucket).createSignedUrl('synthetic.txt',60));
+            const link=new URL(signed.signedUrl,url);
+            assert(['localhost','127.0.0.1'].includes(link.hostname));
+            const response=await fetch(link);
+            assert(response.ok);
+            assert.equal(await response.text(),'test-'+bucket);
+            console.log('PASS: private Storage upload and signed download');
+            let edge=false;
+            for(let i=0;i<15;i++){try{const resp=await fetch(new URL('/functions/v1/pf-health',url));
+              if(resp.ok && (await resp.json()).ok){edge=true;break;}}catch{}await wait(1000);}
+            assert(edge,'Synthetic Edge runtime not reachable');
+            console.log('PASS: synthetic Edge Function');
+            console.log('PASS: isolated Supabase Docker feasibility smoke');
+          }finally{
+            try{await check(admin.storage.from(bucket).remove(['synthetic.txt']));}catch{}
+            try{await check(admin.storage.deleteBucket(bucket));}catch{}
+            try{sql('DROP TABLE IF EXISTS public.pf_smoke');}catch{}
+            for(const id of users)try{await check(admin.auth.admin.deleteUser(id));}catch{}
+          }
+          JS
+
+      - name: Clean isolated environment
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "$PF_SMOKE_DIR" && -d "$PF_SMOKE_DIR" ]]; then
+            (cd "$PF_SMOKE_DIR" && supabase stop --no-backup) || true
+            rm -rf "$PF_SMOKE_DIR"
+          fi
+          echo 'No Production database, Auth, Storage or email operations performed'
