@@ -945,7 +945,7 @@ async function measureOverflow(page) {
     (await page.getByLabel('Workout title').inputValue()) === 'Completed Benchmark' &&
       (await page.getByText('Recorded Bench Press').isVisible()) &&
       (await page.getByText('PR day').isVisible()) &&
-      (await page.getByText('Completed', { exact: true }).isVisible()),
+      (await page.getByLabel('Workout status').inputValue()) === 'completed',
     'lifecycle: completed workout and logged results remain visible in UI after reload'
   );
 
