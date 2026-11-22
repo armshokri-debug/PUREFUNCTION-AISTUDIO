@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getClientStatus } from '../../components/coach/ClientsView';
+import { INVITE_EXPIRY_WINDOW_MS, isInviteLikelyExpired } from '../../components/coach/ClientInviteModal';
 import {
   createClientProfile,
   duplicateClientEmailMessage,
@@ -218,5 +219,60 @@ describe('Client profile snapshot stats', () => {
     expect(stats.nutritionCalories).toBe(2450);
     expect(stats.nutritionProtein).toBe(175);
     expect(stats.notesCount).toBe(1);
+  });
+});
+
+describe('Invitation expiry hint & archive/restore preservation', () => {
+  it('flags invitations older than 24 hours as likely expired without false positives', () => {
+    const now = Date.parse('2026-11-22T12:00:00.000Z');
+    expect(isInviteLikelyExpired(undefined, now)).toBe(false);
+    expect(isInviteLikelyExpired('not-a-date', now)).toBe(false);
+    expect(isInviteLikelyExpired(new Date(now - 60_000).toISOString(), now)).toBe(false);
+    expect(isInviteLikelyExpired(new Date(now - INVITE_EXPIRY_WINDOW_MS).toISOString(), now)).toBe(true);
+    expect(isInviteLikelyExpired(new Date(now - INVITE_EXPIRY_WINDOW_MS * 2).toISOString(), now)).toBe(true);
+  });
+
+  it('archiving and restoring preserves all workouts, assessments, notes, and goals', () => {
+    const original = makeClient({
+      id: 'c-keep',
+      email: 'keep@example.invalid',
+      nutrition: { calories: 2200, protein: 160 },
+      goals: [
+        {
+          id: 'g1',
+          metricKey: 'hip_ir',
+          label: 'Hip IR symmetry',
+          unit: '%',
+          direction: 'down',
+          start: 18,
+          target: 8,
+          createdAt: '2026-11-20T00:00:00.000Z'
+        }
+      ],
+      coachNotes: [{ id: 'n1', date: '2026-11-20', text: 'Track rib cage position' }],
+      workouts: [
+        {
+          id: 'w1',
+          date: '2026-11-21',
+          title: 'Day 1',
+          focus: 'Lower',
+          status: 'completed',
+          blocks: []
+        }
+      ]
+    });
+
+    const archived = { ...original, archived: true, archivedAt: '2026-11-22T01:00:00.000Z' };
+    expect(getClientStatus(archived, new Set([archived.id])).label).toBe('Archived');
+    expect(archived.workouts).toEqual(original.workouts);
+    expect(archived.goals).toEqual(original.goals);
+    expect(archived.coachNotes).toEqual(original.coachNotes);
+
+    const restored = { ...archived, archived: false, archivedAt: undefined };
+    expect(getClientStatus(restored, new Set([restored.id])).label).toBe('Active');
+    expect(restored.workouts).toEqual(original.workouts);
+    expect(restored.goals).toEqual(original.goals);
+    expect(restored.coachNotes).toEqual(original.coachNotes);
+    expect(restored.nutrition).toEqual(original.nutrition);
   });
 });

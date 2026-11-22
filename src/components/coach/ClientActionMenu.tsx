@@ -165,7 +165,7 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
                 Delete Client
                 {deleteDisabled && (
                   <span className="block text-[11px] font-normal text-gray-400">
-                    Unavailable · use Archive
+                    Disabled until server setup
                   </span>
                 )}
               </span>

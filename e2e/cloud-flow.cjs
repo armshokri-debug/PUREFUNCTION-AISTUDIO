@@ -87,12 +87,12 @@ const today = iso(new Date());
   await C.getByPlaceholder('jordan.taylor@example.com').fill('ryan.typo@example.com');
   await C.locator('form button[type=submit]').click();
   await C.waitForTimeout(800);
-  ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'after adding a client the invite sheet opens (no jump to Assessment)');
+  ok(await C.getByText('Not joined yet — send them a secure invitation below.').isVisible(), 'after adding a client the invite sheet opens (no jump to Assessment)');
   await C.getByRole('button', { name: 'Close', exact: true }).last().click();
   await C.waitForTimeout(800);
-  await C.getByRole('button', { name: /Not joined · Invite/ }).click();
-  ok(await C.getByText('Not joined yet — send them the invite below.').isVisible(), 'coach sees the client has not joined');
-  await C.getByRole('button', { name: 'Edit details or share a link' }).click();
+  // Edit Client and Send Invite are clearly separated actions
+  ok(await C.getByRole('button', { name: 'Send Invite', exact: true }).isVisible(), 'unjoined never-invited client shows Send Invite');
+  await C.getByRole('button', { name: 'Edit Client', exact: true }).click();
   const emailBox = C.locator('input[type=email]');
   await emailBox.fill('Ryan@Example.com');
   await C.getByRole('button', { name: 'Save changes' }).click();
@@ -101,12 +101,15 @@ const today = iso(new Date());
   ok(!!ryanRow, 'coach corrected the email; saved lower-cased');
   ok(ryanRow && ryanRow.data && ryanRow.data.inBody.weight === 0, 'new client has empty assessment data (no sample numbers)');
 
-  // email the invite + turn reminders off
-  await C.getByRole('button', { name: /Not joined · Invite/ }).click();
-  await C.getByRole('button', { name: 'Send invitation' }).click();
-  await C.getByText('Invitation accepted for delivery. Your client can check their inbox.').waitFor({ timeout: 5000 });
+  // Send Invite, confirm Resend Invite appears afterwards, and edit reminders in Edit Client
+  await C.getByRole('button', { name: 'Send Invite', exact: true }).click();
+  await C.getByRole('dialog').getByRole('button', { name: 'Send Invite', exact: true }).click();
+  await C.getByText(/Invitation request accepted by the mail service/).waitFor({ timeout: 5000 });
   ok(mock.db.emails.some((e) => e.kind === 'invite' && e.to === 'ryan@example.com'), 'coach emails the invite in one tap');
-  await C.getByRole('button', { name: 'Edit details or share a link' }).click();
+  await C.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await C.waitForTimeout(500);
+  ok(await C.getByRole('button', { name: 'Resend Invite', exact: true }).isVisible(), 'invited-not-joined client shows Resend Invite');
+  await C.getByRole('button', { name: 'Edit Client', exact: true }).click();
   await C.getByLabel('Morning email on workout days').uncheck();
   await C.getByRole('button', { name: 'Save changes' }).click();
   await C.waitForTimeout(1200);
@@ -260,7 +263,19 @@ const today = iso(new Date());
   await C.getByRole('button', { name: 'Clients' }).first().click();
   await C.waitForTimeout(800);
   ok((await C.locator('main img').count()) >= 1, 'coach sees the client’s photo');
-  ok((await C.getByRole('button', { name: /Not joined · Invite/ }).count()) === 0, 'joined client no longer shows the invite badge');
+  ok(
+    (await C.getByRole('button', { name: /^(Send Invite|Resend Invite)$/ }).count()) === 0,
+    'joined client no longer shows Send Invite or Resend Invite'
+  );
+  // Active client shows Account Access guidance (sign-in + Forgot password) without invite-send button
+  await C.getByRole('button', { name: /More actions for Ryan Lee/i }).click();
+  await C.getByRole('menuitem', { name: 'Account Access', exact: true }).click();
+  ok(
+    await C.getByText(/Forgot password/i).isVisible() &&
+      (await C.getByRole('dialog').getByRole('button', { name: /^(Send Invite|Resend Invite)$/ }).count()) === 0,
+    'active client shows sign-in and Forgot password recovery guidance without a new invite button'
+  );
+  await C.getByRole('button', { name: 'Close', exact: true }).last().click();
 
   // reload: data comes back from the cloud, session kept
   await R.reload();
@@ -721,26 +736,38 @@ const today = iso(new Date());
   mock.db.profiles.push({ id: aliasAuthId, role: 'client', display_name: 'Alias Guard', client_id: aliasRow.id });
   mock.db.clientFiles[`${aliasRow.id}/clip.webm`] = { type: 'video/webm', body: Buffer.alloc(1) };
 
+  // Archived tab is always accessible even when empty
+  ok(await C.getByRole('tab', { name: 'Archived (0)', exact: true }).isVisible(), 'clients safety: Archived (0) tab is visible even when empty');
+
   await C.getByRole('button', { name: /More actions for Alias Guard/i }).click();
   const deleteMenuItem = C.getByRole('menuitem', { name: /Delete Client/i });
   ok(await deleteMenuItem.isDisabled(), 'clients safety: Permanent Delete is disabled by default until safe server cleanup is enabled');
 
-  // Archive works without deleting DB record, Auth account, or storage files
+  // Archive works without deleting DB record, Auth account, or storage files, and persists after refresh
   await C.getByRole('menuitem', { name: 'Archive', exact: true }).click();
-  await C.waitForTimeout(1000);
+  await C.waitForTimeout(800);
   const archivedAlias = mock.db.clients.find((c) => c.id === aliasRow.id);
   ok(Boolean(archivedAlias && archivedAlias.data.archived === true), 'clients safety: Archive marks client archived without deleting row');
   ok(mock.db.users.some((u) => u.id === aliasAuthId) && mock.db.profiles.some((p) => p.id === aliasAuthId), 'clients safety: Archive preserves linked Auth account and profile');
   ok(Boolean(mock.db.clientFiles[`${aliasRow.id}/clip.webm`]), 'clients safety: Archive preserves client storage files');
   ok(!mock.log.some((entry) => entry.startsWith('POST /functions/v1/delete-client')), 'clients safety: Archive never invokes delete-client');
 
-  // Archived client can be viewed in Archived filter and restored cleanly
-  await C.getByRole('tab', { name: /^Archived/ }).click();
-  await C.locator('main').getByText('Alias Guard', { exact: true }).first().waitFor();
+  // Refresh page to verify Archive persists across reload
+  await C.reload();
+  await C.getByRole('heading', { name: 'Clients', exact: true }).waitFor();
+  ok((await C.locator('section[aria-label="Client list"]').getByText('Alias Guard', { exact: true }).count()) === 0, 'clients safety: archived client stays hidden from Active after refresh');
+  await C.getByRole('tab', { name: 'Archived (1)', exact: true }).click();
+  await C.locator('section[aria-label="Client list"]').getByText('Alias Guard', { exact: true }).first().waitFor();
   await C.getByRole('button', { name: 'Restore Client', exact: true }).click();
-  await C.waitForTimeout(1000);
+  await C.waitForTimeout(800);
   const restoredAlias = mock.db.clients.find((c) => c.id === aliasRow.id);
   ok(Boolean(restoredAlias && !restoredAlias.data.archived), 'clients safety: Restore returns archived client to active list intact');
+
+  // Refresh page to verify Restore persists across reload
+  await C.reload();
+  await C.getByRole('heading', { name: 'Clients', exact: true }).waitFor();
+  ok(await C.getByRole('tab', { name: 'Archived (0)', exact: true }).isVisible(), 'clients safety: Archived (0) persists after Restore and refresh');
+  ok(await C.locator('section[aria-label="Client list"]').getByText('Alias Guard', { exact: true }).first().isVisible(), 'clients safety: restored client remains in Active after refresh');
 
   // A stale coach editor must fail closed instead of replacing newer results.
   await goToClientsList();

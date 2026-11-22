@@ -82,6 +82,99 @@ describe('Task 1: client invitation email error handling (mocked fetch/supabase)
     const { sendInviteEmail } = await import('../../cloud/email');
     expect(await sendInviteEmail('client-1')).toBeNull();
   });
+
+  it('classifies cooldown, already-active, expired, ownership, ambiguous 200, and network failures accurately', async () => {
+    vi.doMock('../../cloud/supabase', () => ({
+      supabaseUrl: 'https://example.supabase.co',
+      supabase: {
+        auth: {
+          getSession: vi.fn(async () => ({
+            data: { session: { access_token: 'tok-123' } }
+          }))
+        }
+      }
+    }));
+
+    const { sendInviteEmailResult } = await import('../../cloud/email');
+
+    // Ambiguous HTTP 200 without ok: true must never claim delivery
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as typeof fetch;
+    const ambiguous = await sendInviteEmailResult('client-1');
+    expect(ambiguous.ok).toBe(false);
+    if (!ambiguous.ok) expect(ambiguous.kind).toBe('delivery');
+
+    // 429 cooldown
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'An invite was just sent. Wait a minute before sending another.' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as typeof fetch;
+    const cooldown = await sendInviteEmailResult('client-1');
+    expect(cooldown.ok).toBe(false);
+    if (!cooldown.ok) {
+      expect(cooldown.kind).toBe('cooldown');
+      expect(cooldown.error).toContain('Wait a minute');
+    }
+
+    // 409 already active
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'This client already has an account. Ask them to sign in or use Forgot password.' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as typeof fetch;
+    const active = await sendInviteEmailResult('client-1');
+    expect(active.ok).toBe(false);
+    if (!active.ok) {
+      expect(active.kind).toBe('already_active');
+      expect(active.error).toContain('Forgot password');
+    }
+
+    // Expired link/token message
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'Invitation link expired. Request a new invitation.' }), {
+        status: 410,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as typeof fetch;
+    const expired = await sendInviteEmailResult('client-1');
+    expect(expired.ok).toBe(false);
+    if (!expired.ok) expect(expired.kind).toBe('expired');
+
+    // 403 ownership refusal
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'Only the owning coach can invite this client.' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as typeof fetch;
+    const ownership = await sendInviteEmailResult('client-1');
+    expect(ownership.ok).toBe(false);
+    if (!ownership.ok) expect(ownership.kind).toBe('ownership');
+
+    // Network failure
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Failed to fetch');
+    }) as typeof fetch;
+    const network = await sendInviteEmailResult('client-1');
+    expect(network.ok).toBe(false);
+    if (!network.ok) expect(network.kind).toBe('network');
+
+    // Only explicit ok: true succeeds
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    ) as typeof fetch;
+    expect(await sendInviteEmailResult('client-1')).toEqual({ ok: true });
+  });
 });
 
 describe('Task 3: workout & template persistence safety and client result protection', () => {

@@ -16,7 +16,7 @@ import {
   LineChart,
   Utensils
 } from 'lucide-react';
-import { ClientInviteModal } from './ClientInviteModal';
+import { ClientInviteModal, type ClientModalMode } from './ClientInviteModal';
 import { ClientActionMenu } from './ClientActionMenu';
 import { ClientDeleteModal, type DeleteClientOutcome } from './ClientDeleteModal';
 import { ClientProfile, ClientSection } from '../../types';
@@ -95,7 +95,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   onDeleteTestClient,
   joinedIds
 }) => {
-  const [inviteFor, setInviteFor] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<{
+    clientId: string;
+    mode: ClientModalMode;
+  } | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [listFilter, setListFilter] = useState<'active' | 'archived'>('active');
@@ -107,18 +110,11 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [newPhase, setNewPhase] = useState<string>('1-Reposition');
   const [formError, setFormError] = useState<string | null>(null);
 
-  const inviteClient = clients.find((c) => c.id === inviteFor);
+  const modalClient = modalState ? clients.find((c) => c.id === modalState.clientId) : undefined;
   const deleteClientTarget = clients.find((c) => c.id === deleteTargetId);
 
   const activeClients = useMemo(() => clients.filter((c) => !c.archived), [clients]);
   const archivedClients = useMemo(() => clients.filter((c) => Boolean(c.archived)), [clients]);
-
-  // If coach unarchives the last archived client, return cleanly to Active view.
-  useEffect(() => {
-    if (listFilter === 'archived' && archivedClients.length === 0) {
-      setListFilter('active');
-    }
-  }, [listFilter, archivedClients.length]);
 
   const pool = listFilter === 'archived' ? archivedClients : activeClients;
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -174,8 +170,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     setNewEmail('');
     setIsAddModalOpen(false);
     setListFilter('active');
-    // Cloud: right after adding, show the invite to send
-    if (newId && joinedIds) setInviteFor(newId);
+    // Cloud: right after adding, show the invite modal to send
+    if (newId && joinedIds) setModalState({ clientId: newId, mode: 'invite' });
   };
 
   const isDesktopViewport = () =>
@@ -207,8 +203,13 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       archived: nextArchived,
       archivedAt: nextArchived ? new Date().toISOString() : undefined
     });
+    // Persist immediately so refreshing right after Archive or Restore retains the new state.
+    void onEnsureSaved?.();
     if (nextArchived) {
       setMobileDetailOpen(false);
+    } else {
+      setListFilter('active');
+      onHighlightClient?.(client.id);
     }
   };
 
@@ -222,7 +223,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       return {
         ok: false,
         error:
-          'Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead.',
+          'Permanent deletion is disabled until the server deletion workflow is deployed and verified.',
         retryable: false
       };
     }
@@ -257,13 +258,15 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     activeSelection &&
       joinedIds &&
       !joinedIds.has(activeSelection.id) &&
-      !activeSelection.isTestClient
+      !activeSelection.isTestClient &&
+      !activeSelection.archived
   );
-  const selectedInviteButtonLabel = selectedUnjoined
-    ? activeSelection?.invitedAt
-      ? 'Resend Invite'
-      : 'Not joined · Invite'
-    : 'Invite';
+  const selectedInviteActionLabel = activeSelection?.invitedAt ? 'Resend Invite' : 'Send Invite';
+  const selectedMenuInviteLabel = selectedUnjoined
+    ? selectedInviteActionLabel
+    : joinedIds
+      ? 'Account Access'
+      : 'Invite Link';
 
   const workspaceSections = useMemo(() => {
     if (!activeSelection || !selectedSnapshot) return [];
@@ -412,7 +415,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 mobileDetailOpen ? 'hidden md:flex' : 'flex'
               }`}
             >
-              {/* Inline Search + Optional Archived Switcher (only shown when archived clients exist) */}
+              {/* Inline Search + Always-Accessible Active / Archived Switcher */}
               <div className="p-3 border-b border-gray-100 space-y-2.5">
                 <div className="relative">
                   <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -436,40 +439,38 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   )}
                 </div>
 
-                {archivedClients.length > 0 && (
-                  <div
-                    className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#F3F4F6]"
-                    role="tablist"
-                    aria-label="Client list filter"
+                <div
+                  className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#F3F4F6]"
+                  role="tablist"
+                  aria-label="Client list filter"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={listFilter === 'active'}
+                    onClick={() => setListFilter('active')}
+                    className={`min-h-[44px] sm:min-h-[38px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
+                      listFilter === 'active'
+                        ? 'bg-white text-[#111827] shadow-2xs'
+                        : 'text-gray-600 hover:text-[#111827]'
+                    }`}
                   >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={listFilter === 'active'}
-                      onClick={() => setListFilter('active')}
-                      className={`min-h-[36px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
-                        listFilter === 'active'
-                          ? 'bg-white text-[#111827] shadow-2xs'
-                          : 'text-gray-600 hover:text-[#111827]'
-                      }`}
-                    >
-                      Active ({activeClients.length})
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={listFilter === 'archived'}
-                      onClick={() => setListFilter('archived')}
-                      className={`min-h-[36px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
-                        listFilter === 'archived'
-                          ? 'bg-white text-[#111827] shadow-2xs'
-                          : 'text-gray-600 hover:text-[#111827]'
-                      }`}
-                    >
-                      Archived ({archivedClients.length})
-                    </button>
-                  </div>
-                )}
+                    Active ({activeClients.length})
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={listFilter === 'archived'}
+                    onClick={() => setListFilter('archived')}
+                    className={`min-h-[44px] sm:min-h-[38px] py-1.5 px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
+                      listFilter === 'archived'
+                        ? 'bg-white text-[#111827] shadow-2xs'
+                        : 'text-gray-600 hover:text-[#111827]'
+                    }`}
+                  >
+                    Archived ({archivedClients.length})
+                  </button>
+                </div>
               </div>
 
               {/* Compact Client Rows */}
@@ -553,8 +554,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
             >
               {!activeSelection || !selectedSnapshot ? (
                 <div className="py-16 px-6 text-center">
-                  <p className="text-sm text-gray-500">
-                    Select a client from the list to view details and open their workspace.
+                  <p className="text-sm text-gray-500 max-w-sm mx-auto leading-relaxed">
+                    {listFilter === 'archived' && archivedClients.length === 0
+                      ? 'No archived clients yet. Archived clients leave your active roster while keeping all their records intact.'
+                      : 'Select a client from the list to view details and open their workspace.'}
                   </p>
                 </div>
               ) : (
@@ -643,18 +646,22 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       {selectedUnjoined && onUpdateClient && (
                         <button
                           type="button"
-                          onClick={() => setInviteFor(activeSelection.id)}
+                          onClick={() =>
+                            setModalState({ clientId: activeSelection.id, mode: 'invite' })
+                          }
                           className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#92400E] text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <Send className="w-3.5 h-3.5" />
-                          <span>{selectedInviteButtonLabel}</span>
+                          <span>{selectedInviteActionLabel}</span>
                         </button>
                       )}
 
-                      {onUpdateClient && !selectedUnjoined && (
+                      {onUpdateClient && (
                         <button
                           type="button"
-                          onClick={() => setInviteFor(activeSelection.id)}
+                          onClick={() =>
+                            setModalState({ clientId: activeSelection.id, mode: 'edit' })
+                          }
                           className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-[#111827] text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <Pencil className="w-3.5 h-3.5 text-gray-500" />
@@ -666,19 +673,23 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         clientName={activeSelection.name}
                         isArchived={Boolean(activeSelection.archived)}
                         isTestClient={Boolean(activeSelection.isTestClient)}
-                        showInvite={Boolean(onUpdateClient && !activeSelection.isTestClient)}
-                        inviteLabel={
-                          activeSelection.invitedAt && selectedUnjoined
-                            ? 'Resend Invite'
-                            : selectedUnjoined
-                              ? 'Invite'
-                              : 'Invite Link'
-                        }
+                        showInvite={Boolean(
+                          onUpdateClient &&
+                            !activeSelection.isTestClient &&
+                            !activeSelection.archived
+                        )}
+                        inviteLabel={selectedMenuInviteLabel}
                         onView={() => onSelectClient(activeSelection.id, 'exercises')}
-                        onEdit={onUpdateClient ? () => setInviteFor(activeSelection.id) : undefined}
+                        onEdit={
+                          onUpdateClient
+                            ? () => setModalState({ clientId: activeSelection.id, mode: 'edit' })
+                            : undefined
+                        }
                         onInvite={
-                          onUpdateClient && !activeSelection.isTestClient
-                            ? () => setInviteFor(activeSelection.id)
+                          onUpdateClient &&
+                          !activeSelection.isTestClient &&
+                          !activeSelection.archived
+                            ? () => setModalState({ clientId: activeSelection.id, mode: 'invite' })
                             : undefined
                         }
                         onToggleArchive={
@@ -695,7 +706,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                             : undefined
                         }
                         deleteDisabled={!activeSelection.isTestClient && !permanentDeleteEnabled}
-                        deleteDisabledReason="Permanent deletion is disabled until safe server cleanup is enabled. Use Archive instead."
+                        deleteDisabledReason="Permanent deletion is disabled until the server deletion workflow is deployed and verified."
                       />
                     </div>
                   </div>
@@ -815,31 +826,33 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </>
       )}
 
-      {/* Edit & Invite Modal */}
-      {inviteClient && onUpdateClient && (
+      {/* Separated Edit Client / Invite Client Modal */}
+      {modalState && modalClient && onUpdateClient && (
         <ClientInviteModal
-          client={inviteClient}
+          key={`${modalClient.id}-${modalState.mode}`}
+          client={modalClient}
           clients={clients}
-          joined={joinedIds ? joinedIds.has(inviteClient.id) : null}
-          onSave={onUpdateClient}
+          joined={joinedIds ? joinedIds.has(modalClient.id) : null}
+          mode={modalState.mode}
+          onSwitchMode={(nextMode) => setModalState({ clientId: modalClient.id, mode: nextMode })}
+          onSave={(updated) => {
+            onUpdateClient(updated);
+            void onEnsureSaved?.();
+          }}
           onEnsureSaved={onEnsureSaved}
           onInviteSent={() => {
-            onUpdateClient({ ...inviteClient, invitedAt: new Date().toISOString() });
+            onUpdateClient({ ...modalClient, invitedAt: new Date().toISOString() });
+            void onEnsureSaved?.();
           }}
-          onClose={() => setInviteFor(null)}
+          onClose={() => setModalState(null)}
         />
       )}
 
-      {/* Safe In-App Delete Confirmation Modal */}
+      {/* Safe In-App Permanent Delete Confirmation Modal */}
       {deleteClientTarget && (
         <ClientDeleteModal
           client={deleteClientTarget}
           onConfirmDelete={handleConfirmDelete}
-          onArchiveInstead={
-            onUpdateClient && !deleteClientTarget.isTestClient
-              ? (c) => handleToggleArchive(c)
-              : undefined
-          }
           onClose={() => setDeleteTargetId(null)}
         />
       )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, AlertTriangle, Archive, Loader2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Loader2, X } from 'lucide-react';
 import { ClientProfile } from '../../types';
 
 export type DeleteClientOutcome =
@@ -12,14 +12,12 @@ interface ClientDeleteModalProps {
     clientId: string,
     confirmName: string
   ) => Promise<DeleteClientOutcome | string | null | void> | DeleteClientOutcome | string | null | void;
-  onArchiveInstead?: (client: ClientProfile) => void;
   onClose: () => void;
 }
 
 export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
   client,
   onConfirmDelete,
-  onArchiveInstead,
   onClose
 }) => {
   const [confirmName, setConfirmName] = useState('');
@@ -77,7 +75,7 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 id="delete-client-title" className="text-lg font-bold text-[#111827] truncate">
-                {isTest ? 'Delete Test Client' : 'Delete Client'}
+                {isTest ? 'Delete Test Client' : 'Delete Client Permanently'}
               </h2>
               <p className="text-xs text-gray-500 truncate">{client.name}</p>
             </div>
@@ -98,25 +96,11 @@ export const ClientDeleteModal: React.FC<ClientDeleteModalProps> = ({
             This removes the demo test client and all of its sample workouts and assessments. Real clients are unaffected.
           </p>
         ) : (
-          <div className="space-y-3 mb-5">
-            <p className="text-sm text-gray-600 leading-relaxed">
-              Deleting <span className="font-semibold text-[#111827]">{client.name}</span> permanently removes their profile, linked sign-in account, and workout schedule. If you only want to hide them from your active list, archive them instead.
-            </p>
-            {!client.archived && onArchiveInstead && (
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={() => {
-                  onArchiveInstead(client);
-                  onClose();
-                }}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-[#111827] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-40"
-              >
-                <Archive className="w-4 h-4 text-gray-600" />
-                <span>Archive instead (keep records)</span>
-              </button>
-            )}
-          </div>
+          <p className="text-sm text-gray-600 leading-relaxed mb-5">
+            Deleting <span className="font-semibold text-[#111827]">{client.name}</span> permanently
+            removes their profile, workouts, assessments, linked sign-in account, and stored media.
+            This action cannot be undone.
+          </p>
         )}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">

@@ -235,10 +235,10 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
   const canPreviewClient = !profile && !!selectedClient;
   const unreadCount = useUnreadCount(role, role === 'client' ? selectedClient?.id ?? null : null);
 
-  // Cloud: which clients have created their account (for "Not joined · Invite").
+  // Cloud: which clients have created their account (for Send Invite / Resend Invite / Active).
   const [joinedIds, setJoinedIds] = useState<Set<string> | undefined>(undefined);
   useEffect(() => {
-    if (!supabase || profile?.role !== 'coach' || coachTab !== 'clients') return;
+    if (!supabase || profile?.role !== 'coach' || coachTab !== 'clients' || clientOpen) return;
     let cancelled = false;
     const fetchJoined = async () => {
       if (document.visibilityState === 'hidden') return;
@@ -253,7 +253,7 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
       window.removeEventListener('focus', fetchJoined);
       window.clearInterval(interval);
     };
-  }, [profile, coachTab, clients.length]);
+  }, [profile, coachTab, clientOpen, clients.length]);
 
   // Signed in: drop the invite parameter from the address bar.
   useEffect(() => {
