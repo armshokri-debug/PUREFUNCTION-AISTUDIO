@@ -693,7 +693,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         }
                         deleteDisabled={!activeSelection.isTestClient && !permanentDeleteEnabled}
                         deleteDisabledReason="Permanent deletion is disabled until the server deletion workflow is deployed and verified."
-                      />                    </div>
+                      />
+                    </div>
                   </div>
 
                   {/* Clean Profile Summary Row (Real Data Only, Zero Nested Cards) */}
