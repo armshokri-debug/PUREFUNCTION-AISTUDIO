@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Send,
   Pencil,
-  Eye,
   RotateCcw,
   Dumbbell,
   ClipboardCheck,
@@ -634,15 +633,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => onSelectClient(activeSelection.id, 'exercises')}
-                        className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#111827] hover:bg-[#1F2937] text-white text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        <Eye className="w-4 h-4" />
-                        <span>View</span>
-                      </button>
-
                       {selectedUnjoined && onUpdateClient && (
                         <button
                           type="button"
@@ -675,25 +665,21 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         isTestClient={Boolean(activeSelection.isTestClient)}
                         showInvite={Boolean(
                           onUpdateClient &&
-                            !activeSelection.isTestClient &&
-                            !activeSelection.archived
+                          joinedIds?.has(activeSelection.id) &&
+                          !activeSelection.isTestClient &&
+                          !activeSelection.archived
                         )}
                         inviteLabel={selectedMenuInviteLabel}
-                        onView={() => onSelectClient(activeSelection.id, 'exercises')}
-                        onEdit={
-                          onUpdateClient
-                            ? () => setModalState({ clientId: activeSelection.id, mode: 'edit' })
-                            : undefined
-                        }
                         onInvite={
                           onUpdateClient &&
+                          joinedIds?.has(activeSelection.id) &&
                           !activeSelection.isTestClient &&
                           !activeSelection.archived
                             ? () => setModalState({ clientId: activeSelection.id, mode: 'invite' })
                             : undefined
                         }
                         onToggleArchive={
-                          onUpdateClient && !activeSelection.isTestClient
+                          onUpdateClient && !activeSelection.isTestClient && !activeSelection.archived
                             ? () => handleToggleArchive(activeSelection)
                             : undefined
                         }
@@ -707,8 +693,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         }
                         deleteDisabled={!activeSelection.isTestClient && !permanentDeleteEnabled}
                         deleteDisabledReason="Permanent deletion is disabled until the server deletion workflow is deployed and verified."
-                      />
-                    </div>
+                      />                    </div>
                   </div>
 
                   {/* Clean Profile Summary Row (Real Data Only, Zero Nested Cards) */}
@@ -793,7 +778,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
                   {/* Direct Workspace Navigation (Single Action Per Section) */}
                   <div className="pt-5">
-                    <div className="text-xs font-medium text-gray-500 mb-3">Open workspace</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                       {workspaceSections.map((sec) => {
                         const Icon = sec.icon;
@@ -809,9 +793,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                             <div className="min-w-0">
                               <div className="text-sm font-semibold text-[#111827] truncate">
                                 {sec.label}
-                              </div>
-                              <div className="text-[11px] text-gray-500 truncate tabular-nums">
-                                {sec.hint}
                               </div>
                             </div>
                           </button>
