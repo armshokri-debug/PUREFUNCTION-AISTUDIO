@@ -1,3 +1,10 @@
+-- SAFETY LOCK: Abort if this is not the known QA environment.
+DO $qa_project_lock$ BEGIN
+ IF to_regclass('private.qa_mail_outbox') IS NULL THEN
+   RAISE EXCEPTION 'QA ONLY: required private.qa_mail_outbox marker not present';
+ END IF;
+END $qa_project_lock$;
+
 -- QA ONLY: missing business RPCs. No cron/Vault secret, no production data.
 
 -- QA public referral form remains DISABLED: two public submit/lookup RPCs are service-role-only in QA.
