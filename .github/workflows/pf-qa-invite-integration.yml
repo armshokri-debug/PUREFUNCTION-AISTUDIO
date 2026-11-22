@@ -13,7 +13,8 @@ jobs:
   isolated-actual-schema:
     if: >-
       github.event.pull_request.head.repo.full_name == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
-      github.event.pull_request.head.ref == 'qa/invite-onboarding-docker-20261122'
+      (github.event.pull_request.head.ref == 'qa/invite-onboarding-docker-20261122' ||
+       github.event.pull_request.head.ref == 'qa/isolate-recovery-token-test-20261122')
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
