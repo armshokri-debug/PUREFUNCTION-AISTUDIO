@@ -1,3 +1,5 @@
+**Update (2026-11-22):** The later QA schema/storage baseline has now been applied. Current state and remaining gates: [QA schema baseline](QA_SCHEMA_BASELINE_2026-11-22.md). The counts below describe the *earlier* invite-service deployment snapshot, not the current state.
+
 # Pure Function QA runtime — 2026-11-22
 
 **Project:** `nsshdxxdvzzxlmdomixf` (QA only). **Forbidden target:** `rugwzvztweiffprkxfdc` (Production).
