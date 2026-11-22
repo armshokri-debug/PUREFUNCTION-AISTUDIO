@@ -1,6 +1,6 @@
 // Shared by the email Edge Functions. Sends through Resend (https://resend.com).
 // Secrets: RESEND_API_KEY (required), EMAIL_FROM (optional, needs a verified domain),
-// TRANSACTIONAL_EMAIL_FROM (optional, for student invitations, sign-up and recovery),
+// TRANSACTIONAL_EMAIL_FROM (optional, for student and coach invitations, sign-up and recovery),
 // APP_URL (optional).
 import { resolveAppUrl } from './app-url.ts';
 import {

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { PureFunctionLogo } from '../components/VisualAssets';
 import { useSession } from './Session';
+import { COACH_SIGNUP_QUERY } from '../../supabase/functions/_shared/app-url';
 
 const input =
   'w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-base text-[#111827] placeholder:text-gray-400 focus:outline-none focus:border-[#111827]';
@@ -19,12 +20,12 @@ const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 type Who = 'coach' | 'client';
 
-function initialWho(): { who: Who; joinEmail: string } {
+function initialWho(): { who: Who; joinEmail: string; coachSignup?: boolean } {
   try {
     const q = new URLSearchParams(window.location.search);
     const join = q.get('join');
     if (join) return { who: 'client', joinEmail: join };
-    if (q.has('coach')) return { who: 'coach', joinEmail: '' };
+    if (q.has('coach')) return { who: 'coach', joinEmail: '', coachSignup: q.get('coach') === COACH_SIGNUP_QUERY };
     const saved = localStorage.getItem('pf.signin.who');
     if (saved === 'coach' || saved === 'client') return { who: saved, joinEmail: '' };
   } catch {
@@ -38,7 +39,7 @@ export const AuthScreen: React.FC = () => {
   const { signIn, signUp, forgotPassword, resendVerification, notice } = useSession();
   const start = initialWho();
   const [who, setWho] = useState<Who>(start.who);
-  const [mode, setMode] = useState<'sign-in' | 'sign-up' | 'forgot'>(start.joinEmail ? 'sign-up' : 'sign-in');
+  const [mode, setMode] = useState<'sign-in' | 'sign-up' | 'forgot'>(start.joinEmail || start.coachSignup ? 'sign-up' : 'sign-in');
   const [name, setName] = useState('');
   const [email, setEmail] = useState(start.joinEmail);
   const [password, setPassword] = useState('');
