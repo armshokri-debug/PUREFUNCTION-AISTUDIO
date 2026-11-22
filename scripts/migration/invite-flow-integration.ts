@@ -194,7 +194,45 @@ try {
   assert.equal(alreadyActive.status,409);
   assert.equal(mail.length,2);
   console.log('PASS: active client cannot receive a second signup invite');
-  console.log('PASS: real-schema invitation and signup integration with zero real emails');
+
+  // Verify real local GoTrue recovery semantics against a confirmed, linked
+  // synthetic account. This never generates email or uses hosted QA/Production.
+  const oldPassword = 'New-Synthetic-8!' + id;
+  const recoveryPassword = 'Recovered-Synthetic-9!' + id;
+  await read(relogged.auth.signOut());
+  const generatedRecovery = await admin.auth.admin.generateLink({
+    type: 'recovery',
+    email: athleteEmail
+  });
+  assert.ifError(generatedRecovery.error);
+  const recoveryHash = generatedRecovery.data.properties?.hashed_token;
+  assert(recoveryHash && recoveryHash.length > 10, 'No local recovery token');
+  const freshRecovery = client(anon);
+  const recoveryResult = await read(freshRecovery.auth.verifyOtp({
+    token_hash: recoveryHash,
+    type: 'recovery'
+  }));
+  assert.equal(recoveryResult.user?.email, athleteEmail);
+  assert(recoveryResult.session?.access_token, 'Recovery token did not make local session');
+  await read(freshRecovery.auth.updateUser({password: recoveryPassword}));
+  await read(freshRecovery.auth.signOut());
+  const oldLogin = await client(anon).auth.signInWithPassword({
+    email: athleteEmail, password: oldPassword
+  });
+  assert(oldLogin.error, 'Old password remained usable after recovery');
+  const recovered = client(anon);
+  await read(recovered.auth.signInWithPassword({
+    email: athleteEmail, password: recoveryPassword
+  }));
+  assert.equal((await read(recovered.from('clients').select('id').eq('id', clientId))).length, 1);
+  const replay = await client(anon).auth.verifyOtp({
+    token_hash: recoveryHash, type: 'recovery'
+  });
+  assert(replay.error, 'Recovery token unexpectedly reusable');
+  await read(recovered.auth.signOut());
+  console.log('PASS: real local GoTrue recovery, password rotation, old password denial, token replay denial');
+
+  console.log('PASS: real-schema invitation, recovery and signup integration with zero real emails');
 } catch (e) {
   console.error('FAIL: isolated invitation integration: ' +
     (e instanceof Error ? e.message.replace(/https?:\/\/\S+/g,'[url]').slice(0,160) : 'unknown'));
