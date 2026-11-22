@@ -11,7 +11,6 @@ import {
   Link2,
   Plus,
   Search,
-  Trash2,
   X,
   AlertTriangle
 } from 'lucide-react';
@@ -267,7 +266,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             Workout Builder
           </h1>
           {clients.length > 1 && (
-          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-sm sm:text-base text-gray-500">
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-sm sm:text-base text-gray-500">
             <div className="relative inline-flex items-center">
               <select
                 value={client.id}
@@ -287,7 +286,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             <span>
               Phase {client.phaseNumber} ({client.phaseName})
             </span>
-          </div>
+            </div>
           )}
         </div>
 
