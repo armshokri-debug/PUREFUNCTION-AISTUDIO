@@ -1,3 +1,10 @@
+-- SAFETY LOCK: Abort if this is not the known QA environment.
+DO $qa_project_lock$ BEGIN
+ IF to_regclass('private.qa_mail_outbox') IS NULL THEN
+   RAISE EXCEPTION 'QA ONLY: required private.qa_mail_outbox marker not present';
+ END IF;
+END $qa_project_lock$;
+
 -- QA ONLY: six missing indexes on existing QA tables, definition parity with Production.
 
 CREATE INDEX clients_basic_coach_idx ON public.clients USING btree (coach_id);
