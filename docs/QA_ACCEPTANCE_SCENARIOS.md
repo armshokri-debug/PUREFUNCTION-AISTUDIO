@@ -11,7 +11,7 @@ Every check MUST be labeled with its actual evidence tier. Passing a lower tier 
 |---|---|---|---|
 | **Tier 1: Unit Tests (`vitest`)** | Pure functions, Edge Function handlers, SQL query construction, security guard logic, DDL scanners | Live PostgreSQL RLS, GoTrue OTP/JWT behavior, real Storage policies | **VERIFIED** locally |
 | **Tier 2: Mock Integration (`e2e/cloud-flow.cjs`, `e2e/mock-supabase.cjs`)** | End-to-end React UI state, portal guards, sync conflict UI, responsive layout against in-memory mock | Real Supabase RLS, real GoTrue token expiry/confirmation, real Storage signed URLs | **VERIFIED** in CI (`main`) |
-| **Tier 3: Real QA Acceptance (`nsshdxxdvzzxlmdomixf`)** | Real PostgreSQL RLS/triggers/RPCs, real GoTrue confirmation/recovery, real Storage private bucket enforcement, real Edge Functions with synthetic `@qa.invalid` users | Production data integrity or Production email domain deliverability | **BLOCKED** until QA baseline rollout completes |
+| **Tier 3: Real QA Acceptance (`nsshdxxdvzzxlmdomixf`)** | Real PostgreSQL RLS/triggers/RPCs, real GoTrue confirmation/recovery, real Storage private bucket enforcement, real Edge Functions with synthetic `@qa.invalid` users | Production data integrity or Production email domain deliverability | **SCHEMA READY; REAL AUTH/BROWSER TESTS NOT YET EXECUTED** |
 | **Tier 4: Production Acceptance (`rugwzvztweiffprkxfdc`)** | Live production smoke, read-only health/RLS checks, live transactional email verification with owner consent | Never tested with destructive or synthetic write fixtures | **PROPOSED / MANUAL** |
 
 ---
