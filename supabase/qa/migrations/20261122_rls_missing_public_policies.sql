@@ -1,3 +1,10 @@
+-- SAFETY LOCK: Abort if this is not the known QA environment.
+DO $qa_project_lock$ BEGIN
+ IF to_regclass('private.qa_mail_outbox') IS NULL THEN
+   RAISE EXCEPTION 'QA ONLY: required private.qa_mail_outbox marker not present';
+ END IF;
+END $qa_project_lock$;
+
 -- QA-only policies copied from read-only Production metadata. No Production data.
 
 -- Preserve legacy messages table as deny-all in QA: never grant legacy message writes.
