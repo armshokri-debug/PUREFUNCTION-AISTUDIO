@@ -123,10 +123,24 @@ try {
     assert.equal(wiped.length, 1, 'Expected local accidental-delete simulation to remove one synthetic client');
     assert.equal((await fetchRows(coachA.user,'workouts','id',workout)).length,0,
       'Expected local cascading delete before rollback');
-    execFileSync('pg_restore', [
-      '--dbname',db,'--data-only','--disable-triggers','--no-owner','--no-acl',
-      '--exit-on-error','--single-transaction',snapshot
-    ], { timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      execFileSync('pg_restore', [
+        '--dbname',db,'--data-only','--disable-triggers','--no-owner','--no-acl',
+        '--exit-on-error','--single-transaction',snapshot
+      ], { timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      // Only the error classification from the synthetic local restore is printed.
+      const raw = String(err?.stderr || '');
+      const line = raw.split('\n').find(l => /pg_restore: error:|ERROR:|FATAL:/.test(l)) || '';
+      const classified = /duplicate key|already exists/i.test(line) ? 'duplicate-key' :
+        /foreign key|violates.*constraint/i.test(line) ? 'foreign-key' :
+        /permission denied|must be owner/i.test(line) ? 'ownership-permissions' :
+        /role.*does not exist/i.test(line) ? 'missing-role' :
+        /does not exist/i.test(line) ? 'missing-object' :
+        /trigger/i.test(line) ? 'trigger' : 'other';
+      console.error('ROLLBACK_RESTORE_FAILURE_CATEGORY: ' + classified);
+      throw new Error('isolated synthetic pg_restore failed (' + classified + ')');
+    }
     assert.equal((await fetchRows(coachA.user,'clients','id',cid)).length,1);
     assert.equal((await fetchRows(coachA.user,'workouts','id',workout)).length,1);
     assert.equal((await fetchRows(member.user,'workouts','id',workout)).length,1);
