@@ -20,7 +20,7 @@ export const ProgramsView: React.FC<{
       <div>
         <h1 className="text-2xl sm:text-[34px] font-bold tracking-tight text-[#111827]">Programs</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Week-by-week plan for {client.name.split(' ')[0]} · Phase {client.phaseNumber} ({client.phaseName}) · copy a week forward to build the next 12 weeks
+          {client.name.split(' ')[0]} · Phase {client.phaseNumber}
         </p>
       </div>
       <select
