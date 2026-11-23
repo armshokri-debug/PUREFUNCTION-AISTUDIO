@@ -146,6 +146,8 @@ export const PHASES: ProgramPhase[] = ['Reposition', 'Integrate', 'Strength', 'P
 
 export interface Exercise {
   id: string;
+  /** Trusted DB owner for cloud-saved exercise; not included in JSON payloads. */
+  ownerId?: string;
   name: string;
   bodyPart: BodyPart;
   equipment: Equipment;
