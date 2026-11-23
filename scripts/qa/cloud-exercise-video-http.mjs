@@ -53,6 +53,23 @@ async function ok(promise,label) {
   if (error) throw Error(`${label}: ${error.code || error.status || 'API error'}`);
   return data;
 }
+// Storage deletion can become visible slightly after a successful remove response.
+// Count only an actual missing-object response as proof; never treat auth/network errors as success.
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitForVideoAbsence(client, objectPath, tries = 8) {
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const { error } = await client.storage.from(BUCKET).download(objectPath);
+    if (error) {
+      const code = String(error.statusCode ?? error.status ?? '');
+      const message = String(error.message ?? '');
+      if (code === '404' || /object not found|not found|no such object/i.test(message)) return true;
+      throw Error(`Unexpected Storage verification failure: ${code || message}`);
+    }
+    if (attempt + 1 < tries) await pause(Math.min(250 * (attempt + 1), 1000));
+  }
+  return false;
+}
+
 async function verifyCoach(client,email,password,label) {
   const session=await ok(client.auth.signInWithPassword({email,password}),label+' login');
   assert(session.user?.id,'BLOCKED: authenticated identity missing');
@@ -86,11 +103,11 @@ try {
   const afterAttack=await ok(a.storage.from(BUCKET).download(path),'verify non-owner did not delete');
   assert.deepEqual(Buffer.from(await afterAttack.arrayBuffer()),payload,
     'SECURITY FAILURE: non-owner deletion removed/changed the video');
-  const removed=await ok(a.storage.from(BUCKET).remove([path]),'owner delete');
-  assert(removed?.some(x=>x.name===path),'Owner delete did not confirm the file path');
-  const downloadAfter=await a.storage.from(BUCKET).download(path);
-  assert(downloadAfter.error,'SECURITY FAILURE: deleted video is still available');
-  cleared=true;
+  await ok(a.storage.from(BUCKET).remove([path]),'owner delete');
+  // Storage HTTP may return an empty removal list or briefly serve a stale response.
+  // A bounded, authenticated re-check is the authoritative proof of deletion.
+  cleared=await waitForVideoAbsence(a,path);
+  assert(cleared,'SECURITY FAILURE: owner-deleted video remained downloadable after bounded retries');
   passed=true;
   console.log('PASS: cloud QA actual authenticated Storage HTTP (two synthetic coaches)');
   console.log('PASS: owner upload/delete, cross-coach upload/delete rejected, shared read, object gone');
@@ -101,17 +118,17 @@ try {
   // Only this run's random synthetic paths can be removed. Never touch existing videos.
   if (forbiddenUploadCreated && forbiddenPath) {
     const accidental = await a.storage.from(BUCKET).remove([forbiddenPath]);
-    const absent = await a.storage.from(BUCKET).download(forbiddenPath);
-    if (accidental.error || !absent.error) {
+    let absent = false;
+    try { absent = await waitForVideoAbsence(a,forbiddenPath); } catch { absent = false; }
+    if (!absent) {
       console.error('BLOCKED: unexpected cross-owner fixture cleanup failed: '+forbiddenPath);
       process.exitCode=1;
     }
   }
   if (uploaded && !cleared && path) {
     try {
-      const removed=await a.storage.from(BUCKET).remove([path]);
-      const check=await a.storage.from(BUCKET).download(path);
-      cleared=Boolean(!removed.error && check.error);
+      await a.storage.from(BUCKET).remove([path]);
+      cleared=await waitForVideoAbsence(a,path);
     } catch { cleared=false; }
     if (!cleared) {
       console.error('BLOCKED: synthetic QA video cleanup could not be verified: '+path);
