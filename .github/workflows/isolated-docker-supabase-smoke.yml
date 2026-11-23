@@ -145,6 +145,13 @@ jobs:
           }
           JS
 
+      - name: Verify owner-only exercise video Storage via authenticated HTTP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          node scripts/qa/exercise-video-storage-http.mjs "$PF_SMOKE_DIR/status.json"
+
       - name: Clean isolated environment
         if: always()
         shell: bash
