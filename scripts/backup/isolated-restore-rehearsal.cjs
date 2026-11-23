@@ -92,7 +92,9 @@ function restoreDataTables(dump,schema,tableNames) {
   assert(items.length>0, 'No expected '+schema+' table data in original backup');
   const f=path.join(tmp,schema+'.toc');
   fs.writeFileSync(f,items.join('\n')+'\n',{mode:0o600});
-  pgRestore(dump,['--data-only','--disable-triggers','--use-list',f]);
+  // Provider-managed Auth/Storage tables are not owned by the local postgres
+  // connection. Do not disable their system triggers during data replay.
+  pgRestore(dump,['--data-only','--use-list',f]);
 }
 async function main(){
   const accessToken=await exchangeRefreshToken({
