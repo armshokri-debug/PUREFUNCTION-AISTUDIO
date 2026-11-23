@@ -64,7 +64,7 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
     if (!prof) return false;
     if (prof.role === 'coach') {
       if (table === 'clients') return !db.clients.some(c => c.id === row.id) || row.coach_id === prof.id || db.clients.some(c => c.id === row.id && c.coach_id === prof.id);
-      if (table === 'exercises') return true;
+      if (table === 'exercises') return !row.owner_id || row.owner_id === prof.id;
       if (table === 'program_templates') return !row.owner_id || row.owner_id === prof.id;
       return canRead(prof, table, row);
     }
@@ -295,7 +295,8 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
     m = path.match(/^\/storage\/v1\/object\/exercise-videos\/(.+)$/);
     if (m && method === 'POST') {
       const prof = profileOf(uidFrom(req));
-      if (!prof || prof.role !== 'coach') return json(route, 403, { message: 'new row violates row-level security policy' });
+      if (!prof || prof.role !== 'coach' || decodeURIComponent(m[1]).split('/')[0] !== prof.id)
+        return json(route, 403, { message: 'new row violates row-level security policy' });
       let body = req.postDataBuffer() || Buffer.alloc(0);
       let type = req.headers()['content-type'] || '';
       const bm = type.match(/boundary=(.+)$/);
@@ -314,6 +315,9 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
     }
     if (path === '/storage/v1/object/exercise-videos' && method === 'DELETE') {
       const b = JSON.parse(req.postData() || '{}');
+      const prof = profileOf(uidFrom(req));
+      if (!prof || prof.role !== 'coach' || (b.prefixes || []).some(p => p.split('/')[0] !== prof.id))
+        return json(route, 403, { message: 'Not the video owner' });
       (b.prefixes || []).forEach((p) => delete db.files[p]);
       return json(route, 200, []);
     }
@@ -376,6 +380,13 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
         const arr = Array.isArray(body) ? body : [body];
         for (const r of arr) {
           if (table === 'coach_messages') { r.id ??= crypto.randomUUID(); r.created_at ??= new Date().toISOString(); if (r.from_coach !== (prof?.role === 'coach')) return json(route, 403, { code: '42501', message: 'Sender mismatch' }); }
+          if (table === 'exercises') {
+            const existing = rows.find(e => e.id === r.id);
+            if (existing?.owner_id && existing.owner_id !== prof?.id)
+              return json(route, 403, { code: '42501', message: 'Exercise belongs to another coach' });
+            if (r.owner_id && r.owner_id !== prof?.id)
+              return json(route, 403, { code: '42501', message: 'Cannot assign exercise to another coach' });
+          }
           if (!canWrite(prof, table, r)) return json(route, 403, { code: '42501', message: `new row violates row-level security policy for table "${table}"` });
           if (table === 'clients' && prof.role !== 'coach') {
             // Real database: INSERT ... ON CONFLICT also checks the INSERT policy (coach only), so a client can never POST here.
@@ -393,6 +404,7 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
           const row = { ...(i >= 0 ? rows[i] : {}), ...r, updated_at: new Date().toISOString() };
           if (table === 'clients' && i < 0) row.coach_id = prof.id;
           if (table === 'program_templates' && i < 0) row.owner_id = prof.id;
+          if (table === 'exercises' && i < 0) row.owner_id = prof.id;
           if (i >= 0) rows[i] = row;
           else rows.push(row);
           if (table === 'clients' && row.email) {
@@ -406,6 +418,8 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       if (method === 'PATCH') {
         const patch = JSON.parse(req.postData() || '{}');
         const hit = rows.filter((r) => matches(r, url.searchParams) && canRead(prof, table, r) && (table === 'coach_messages' ? r.from_coach !== (prof.role === 'coach') : canWrite(prof, table, r)));
+        if (table === 'exercises' && patch.owner_id && patch.owner_id !== prof?.id)
+          return json(route, 403, { code: '42501', message: 'Exercise ownership cannot be changed' });
         for (const r of hit) {
           if (table === 'clients' && prof.role === 'client' && patch.data) {
             const allowed = ['photoUrl','nutrition','manualRecords'];
