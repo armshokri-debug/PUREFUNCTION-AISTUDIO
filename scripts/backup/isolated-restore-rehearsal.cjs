@@ -85,10 +85,12 @@ function restoreDataTables(dump,schema,tableNames) {
   try {toc=tool('pg_restore',['--list',dump]);}
   catch{throw Error('Cannot inspect '+schema+' dump catalog');}
   const keep=new Set(tableNames);
-  const items=toc.split('\n').filter(l=>{
+  const items=toc.split('\n').map(l=>{
     const m=l.match(/^\d+;\s+\d+\s+\d+\s+TABLE DATA\s+(\S+)\s+(\S+)\s/);
-    return m&&m[1]===schema&&keep.has(m[2]);
-  });
+    return {line:l,schema:m?.[1],table:m?.[2]};
+  }).filter(x=>x.schema===schema&&keep.has(x.table))
+    .sort((a,b)=>tableNames.indexOf(a.table)-tableNames.indexOf(b.table))
+    .map(x=>x.line);
   assert(items.length>0, 'No expected '+schema+' table data in original backup');
   const f=path.join(tmp,schema+'.toc');
   fs.writeFileSync(f,items.join('\n')+'\n',{mode:0o600});
