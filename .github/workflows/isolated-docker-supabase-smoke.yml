@@ -22,8 +22,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --legacy-peer-deps
-      - name: Syntax-check isolated Storage integration script
-        run: node --check scripts/qa/exercise-video-storage-http.mjs
+      - name: Syntax-check both Storage integration runners
+        run: |
+          node --check scripts/qa/exercise-video-storage-http.mjs
+          node --check scripts/qa/cloud-exercise-video-http.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 3.2.0
