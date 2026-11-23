@@ -51,9 +51,9 @@ function pgRestore(file,mode, extra=[]) {
     // pg_restore errors can include statements and row data. Print only a
     // bounded, redacted error class, never raw SQL or untrusted backup content.
     const raw=String(err.stderr||'');
-    const lines=raw.split('\\n').filter(l=>/pg_restore: error:|ERROR:|FATAL:/i.test(l)).slice(0,3);
-    const safe=lines.map(l=>l.replace(/[a-z0-9._%+\\-]+@[a-z0-9.\\-]+/gi,'[email]')
-      .replace(/'[\\s\\S]*?'/g,'[value]').replace(/"[^"]*"/g,'[identifier]')
+    const lines=raw.split(/\r?\n/).filter(l=>/pg_restore: error:|ERROR:|FATAL:/i.test(l)).slice(0,3);
+    const safe=lines.map(l=>l.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+/gi,'[email]')
+      .replace(/'[\s\S]*?'/g,'[value]').replace(/"[^"]*"/g,'[identifier]')
       .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi,'[uuid]').slice(0,160)).join(' ; ');
     throw Error('Local restore failed for '+path.basename(file)+(safe?' / '+safe:''));
   }
