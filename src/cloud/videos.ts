@@ -45,7 +45,11 @@ export async function videoUrl(path: string, bucket: VideoBucket = BUCKET): Prom
 }
 
 export async function deleteExerciseVideo(path: string, bucket: VideoBucket = BUCKET): Promise<void> {
-  if (!supabase) return;
+  if (!supabase) throw new Error('Cloud is not configured');
+  const { data, error } = await supabase.storage.from(bucket).remove([path]);
+  if (error) throw error;
+  if (!data?.some((item) => item.name === path)) {
+    throw new Error('Video was not removed. Check your connection and access.');
+  }
   signed.delete(`${bucket}/${path}`);
-  await supabase.storage.from(bucket).remove([path]);
 }
