@@ -149,7 +149,7 @@ try {
   console.log('PASS: actual PR SQL ownership migration and REST sharing work against isolated local Supabase');
 } catch (e) {
   console.error('FAIL: disposable Storage API integration: ' +
-    (e instanceof Error ? e.message.replace(/https?:\\/\\/[^\\s]+/g, '[url]').slice(0,220) : 'unknown'));
+    (e instanceof Error ? e.message.split(api).join('[local-api]').slice(0,220) : 'unknown'));
   process.exitCode = 1;
 } finally {
   for (const uid of users) {
