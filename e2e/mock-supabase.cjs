@@ -438,7 +438,7 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
         if (!prof || prof.role !== 'coach') return route.fulfill({ status: 204, headers: cors }); // RLS: silently nothing
         const deleted = [];
         for (let i = rows.length - 1; i >= 0; i--) {
-          if (matches(rows[i], url.searchParams) && canRead(prof, table, rows[i])) {
+          if (matches(rows[i], url.searchParams) && canRead(prof, table, rows[i]) && canWrite(prof, table, rows[i])) {
             const [gone] = rows.splice(i, 1); deleted.push(gone);
             if (table === 'clients') db.workouts = db.workouts.filter((w) => w.client_id !== gone.id);
             broadcast(table, 'DELETE', { id: gone.id }, gone);
