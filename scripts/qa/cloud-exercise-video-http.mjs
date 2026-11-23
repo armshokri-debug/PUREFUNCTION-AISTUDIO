@@ -42,9 +42,11 @@ function newClient() {
 }
 const [a,b] = [newClient(),newClient()];
 let path;
+let forbiddenPath;
 let ownerId;
 let uploaded = false;
 let cleared = false;
+let forbiddenUploadCreated = false;
 let passed = false;
 async function ok(promise,label) {
   const {data,error}=await promise;
@@ -64,15 +66,16 @@ try {
   const secondId=await verifyCoach(b,...creds[1],'second coach');
   assert.notEqual(ownerId,secondId,'BLOCKED: same account twice');
   path=`${ownerId}/qa-storage-accept-${randomUUID()}/sample.mp4`;
-  const rejectedPath=`${ownerId}/qa-storage-accept-${randomUUID()}/forbidden.mp4`;
+  forbiddenPath=`${ownerId}/qa-storage-accept-${randomUUID()}/forbidden.mp4`;
   const payload=Buffer.from('PUREFUNCTION_QA_HTTP_STORAGE_SYNTHETIC_ONLY');
   await ok(a.storage.from(BUCKET).upload(path,payload,{
     contentType:'video/mp4',upsert:false
   }),'owner upload');
   uploaded=true;
-  const attemptedUpload=await b.storage.from(BUCKET).upload(rejectedPath,payload,{
+  const attemptedUpload=await b.storage.from(BUCKET).upload(forbiddenPath,payload,{
     contentType:'video/mp4',upsert:false
   });
+  forbiddenUploadCreated=!attemptedUpload.error;
   assert(attemptedUpload.error,'SECURITY FAILURE: other coach uploaded into owner folder');
   const otherRead=await ok(b.storage.from(BUCKET).download(path),'second coach read shared video');
   assert.deepEqual(Buffer.from(await otherRead.arrayBuffer()),payload,
@@ -95,7 +98,15 @@ try {
   console.error('FAIL: QA HTTP acceptance: '+(e instanceof Error?e.message:'unknown'));
   process.exitCode=1;
 } finally {
-  // Only this run's random synthetic path can be removed. Never touch any existing video.
+  // Only this run's random synthetic paths can be removed. Never touch existing videos.
+  if (forbiddenUploadCreated && forbiddenPath) {
+    const accidental = await a.storage.from(BUCKET).remove([forbiddenPath]);
+    const absent = await a.storage.from(BUCKET).download(forbiddenPath);
+    if (accidental.error || !absent.error) {
+      console.error('BLOCKED: unexpected cross-owner fixture cleanup failed: '+forbiddenPath);
+      process.exitCode=1;
+    }
+  }
   if (uploaded && !cleared && path) {
     try {
       const removed=await a.storage.from(BUCKET).remove([path]);
