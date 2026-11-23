@@ -22,6 +22,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --legacy-peer-deps
+      - name: Syntax-check both Storage integration runners
+        run: |
+          node --check scripts/qa/exercise-video-storage-http.mjs
+          node --check scripts/qa/cloud-exercise-video-http.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 3.2.0
@@ -144,6 +148,13 @@ jobs:
             for(const id of users)try{await check(admin.auth.admin.deleteUser(id));}catch{}
           }
           JS
+
+      - name: Verify owner-only exercise video Storage via authenticated HTTP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          node scripts/qa/exercise-video-storage-http.mjs "$PF_SMOKE_DIR/status.json"
 
       - name: Clean isolated environment
         if: always()

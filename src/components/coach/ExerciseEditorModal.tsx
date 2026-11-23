@@ -18,6 +18,8 @@ import { ExerciseVideoPlayer } from '../ExerciseMedia';
 interface Props {
   /** Existing exercise to edit, or null to create a new one. */
   exercise: Exercise | null;
+  /** Built-in or another coach's content: create a separate owned copy. */
+  saveAsCopy?: boolean;
   onSave: (exercise: Exercise) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   onClose: () => void;
@@ -29,7 +31,7 @@ const labelCls = 'block text-xs font-medium text-gray-600 mb-1.5';
 
 type PendingFile = { file: File; durationSec: number; previewUrl: string };
 
-export const ExerciseEditorModal: React.FC<Props> = ({ exercise, onSave, onDelete, onClose }) => {
+export const ExerciseEditorModal: React.FC<Props> = ({ exercise, saveAsCopy = false, onSave, onDelete, onClose }) => {
   const isNew = !exercise;
   const [name, setName] = useState(exercise?.name ?? '');
   const [bodyPart, setBodyPart] = useState<Exercise['bodyPart']>(exercise?.bodyPart ?? 'Lower');
@@ -90,7 +92,7 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, onSave, onDelet
       setFormError('Give the exercise a name.');
       return;
     }
-    const id = exercise?.id ?? `ex-custom-${Date.now()}`;
+    const id = exercise && !saveAsCopy ? exercise.id : `ex-custom-${crypto.randomUUID()}`;
     let finalVideo = video;
 
     if (pendingFile) {
@@ -127,6 +129,7 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, onSave, onDelet
     await onSave({
       ...(exercise ?? { isCustom: true, source: 'coach' }),
       id,
+      ...(saveAsCopy ? { ownerId: undefined, isCustom: true, source: 'coach' as const } : {}),
       name: name.trim(),
       bodyPart,
       plane: (plane || undefined) as Exercise['plane'],
@@ -155,7 +158,7 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, onSave, onDelet
       <div className="bg-white w-full sm:max-w-2xl max-h-[92dvh] overflow-y-auto rounded-t-3xl sm:rounded-2xl shadow-xl">
         {/* Header */}
         <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-5 sm:px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-[#111827]">{isNew ? 'New exercise' : 'Edit exercise'}</h2>
+          <h2 className="text-lg font-bold text-[#111827]">{isNew ? 'New exercise' : saveAsCopy ? 'Save your own copy' : 'Edit exercise'}</h2>
           <button onClick={onClose} className="p-2 -mr-2 rounded-lg text-gray-400 hover:text-[#111827] hover:bg-gray-100 cursor-pointer" aria-label="Close">
             <X className="w-5 h-5" />
           </button>
@@ -352,7 +355,7 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, onSave, onDelet
 
         {/* Footer */}
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-5 sm:px-6 py-4 flex items-center justify-between gap-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {!isNew && exercise?.isCustom && onDelete ? (
+          {!isNew && !saveAsCopy && exercise?.isCustom && onDelete ? (
             confirmDelete ? (
               <button disabled={saving} onClick={async () => { setSaving(true); try { await onDelete(exercise.id); onClose(); } catch { setFormError('Exercise was not removed. Try again.'); } finally { setSaving(false); } }} className="text-sm font-semibold text-red-600 cursor-pointer">
                 Tap again to delete

@@ -23,6 +23,8 @@ import { useFavorites } from '../../state/favorites';
 import { formatDate, todayISO } from '../../lib/workouts';
 import { ExerciseThumb, ExerciseVideoPlayer } from '../ExerciseMedia';
 import { ExerciseEditorModal } from './ExerciseEditorModal';
+import { useSession } from '../../cloud/Session';
+import { isCloud } from '../../cloud/supabase';
 
 interface ExerciseLibraryViewProps {
   clients: ClientProfile[];
@@ -50,6 +52,8 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
   const [sort, setSort] = useState<'best' | 'az'>('best');
   const [shown, setShown] = useState(PAGE);
   const { exercises, catalogLoaded, getExercise, saveExercise, deleteExercise } = useExerciseLibrary();
+  const { profile } = useSession();
+  const ownsExercise = (exercise: Exercise) => !isCloud || (!!profile?.id && exercise.ownerId === profile.id);
   const { favorites, toggle: toggleFavorite } = useFavorites();
   const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
   const activeExercise = activeExerciseId ? getExercise(activeExerciseId) ?? null : null;
@@ -68,11 +72,17 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
     plane: selectedPlane,
     pattern: selectedPattern
   };
-  const filteredExercises = useMemo(
-    () => searchExercises(exercises, searchQuery, filters, { favorites, sort }),
+  const filteredExercises = useMemo(() => {
+    const pool = isCloud && scope === 'mine'
+      ? exercises.filter((e) => e.ownerId === profile?.id)
+      : exercises;
+    // In cloud mode, "Mine" is the trusted DB owner, never the user-editable source label.
+    const effectiveFilters = isCloud && scope === 'mine'
+      ? { ...filters, scope: 'all' as const }
+      : filters;
+    return searchExercises(pool, searchQuery, effectiveFilters, { favorites, sort });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [exercises, searchQuery, scope, group, selectedEquipment, selectedPlane, selectedPattern, favorites, sort]
-  );
+  }, [exercises, searchQuery, scope, group, selectedEquipment, selectedPlane, selectedPattern, favorites, sort, profile?.id]);
   const visibleExercises = filteredExercises.slice(0, shown);
   const suggestion = useMemo(
     () => (filteredExercises.length === 0 && searchQuery.trim() ? suggestQuery(exercises, searchQuery) : null),
@@ -156,7 +166,11 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
         onClick={() => setEditing(activeExercise)}
         className="w-full inline-flex items-center justify-center gap-2 mb-4 border border-gray-200 hover:border-[#111827] text-[#111827] text-xs font-semibold py-2.5 rounded-xl cursor-pointer"
       >
-        {activeExercise.video ? (
+        {!ownsExercise(activeExercise) ? (
+          <>
+            <Pencil className="w-3.5 h-3.5" /> Customize as your own copy
+          </>
+        ) : activeExercise.video ? (
           <>
             <Pencil className="w-3.5 h-3.5" /> Edit exercise / replace video
           </>
@@ -366,7 +380,8 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
                   </h3>
                   <p className="text-xs text-gray-500 truncate mt-0.5">
                     {groupOf(exercise)} · {equipmentTypeOf(exercise)}
-                    {(exercise.source === 'coach' || exercise.isCustom) && <span className="text-[#92400E] font-semibold"> · Yours</span>}
+                    {(exercise.source === 'coach' || exercise.isCustom) &&
+                      <span className="text-[#92400E] font-semibold"> · {ownsExercise(exercise) ? 'Yours' : 'Shared'}</span>}
                   </p>
                 </div>
                 <button
@@ -457,6 +472,7 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
       {editing !== undefined && (
         <ExerciseEditorModal
           exercise={editing}
+          saveAsCopy={Boolean(editing && !ownsExercise(editing))}
           onSave={async (ex) => {
             await saveExercise(ex);
             setActiveExerciseId(ex.id);

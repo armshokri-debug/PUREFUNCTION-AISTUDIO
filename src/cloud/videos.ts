@@ -8,7 +8,11 @@ export const CLOUD_VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const signed = new Map<string, { url: string; expires: number }>();
 
 export async function uploadExerciseVideo(exerciseId: string, file: File): Promise<string> {
-  return uploadVideo(BUCKET, exerciseId, file);
+  if (!supabase) throw new Error('Cloud is not configured');
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user?.id) throw new Error('Sign in to upload a video');
+  // Storage RLS independently checks the authenticated UID as the first path segment.
+  return uploadVideo(BUCKET, `${data.user.id}/${exerciseId.replace(/[^a-zA-Z0-9_-]/g, '_')}`, file);
 }
 
 /** Private assessment video: stored under the client's own folder (only coach + that client can read). */
@@ -41,7 +45,11 @@ export async function videoUrl(path: string, bucket: VideoBucket = BUCKET): Prom
 }
 
 export async function deleteExerciseVideo(path: string, bucket: VideoBucket = BUCKET): Promise<void> {
-  if (!supabase) return;
+  if (!supabase) throw new Error('Cloud is not configured');
+  const { data, error } = await supabase.storage.from(bucket).remove([path]);
+  if (error) throw error;
+  if (!data?.some((item) => item.name === path)) {
+    throw new Error('Video was not removed. Check your connection and access.');
+  }
   signed.delete(`${bucket}/${path}`);
-  await supabase.storage.from(bucket).remove([path]);
 }

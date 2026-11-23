@@ -294,6 +294,44 @@ const today = iso(new Date());
   ok(files.length === 1, 'video uploaded to cloud storage (' + files.join(',') + ')');
   const exRow = mock.db.exercises.find((e) => e.data.name === 'Ryan Wall Drill');
   ok(exRow && exRow.data.video.kind === 'storage', 'exercise with cloud video saved to the database');
+
+  // Exercise/media ownership: one coach can view shared training content, but
+  // must not edit/delete another coach's exercise or upload/delete their media.
+  const ownerUid = mock.db.profiles.find(p => p.role === 'coach').id;
+  ok(exRow?.owner_id === ownerUid, 'new exercise owner comes from the authenticated server identity');
+  ok(files[0]?.startsWith(ownerUid + '/'), 'exercise video uses an owner-scoped storage path');
+  const otherUid = '22222222-2222-4222-8222-222222222222';
+  mock.db.users.push({ id: otherUid, email: 'coach-two@example.com', confirmed: true });
+  mock.db.profiles.push({ id: otherUid, role: 'coach', display_name: 'Second Coach', client_id: null });
+  const protectedName = exRow.data.name;
+  const isolation = await C.evaluate(async ({ otherUid, exerciseId, videoPath }) => {
+    const headers = { authorization: `Bearer tok-${otherUid}`, apikey: 'anon',
+      'content-type': 'application/json', prefer: 'return=representation' };
+    const url = 'https://mock.supabase.co/rest/v1/exercises?id=eq.' + encodeURIComponent(exerciseId);
+    const shared = await fetch(url, { headers });
+    const patch = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ data: { name: 'Taken over' } }) });
+    const erase = await fetch(url, { method: 'DELETE', headers });
+    const upsert = await fetch('https://mock.supabase.co/rest/v1/exercises?on_conflict=id', {
+      method: 'POST', headers: { ...headers, prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({ id: exerciseId, data: { name: 'Stolen' } })
+    });
+    const upload = await fetch('https://mock.supabase.co/storage/v1/object/exercise-videos/' + videoPath, {
+      method: 'POST', headers, body: new Blob(['bad'], { type: 'video/mp4' })
+    });
+    const videoDelete = await fetch('https://mock.supabase.co/storage/v1/object/exercise-videos', {
+      method: 'DELETE', headers, body: JSON.stringify({ prefixes: [videoPath] })
+    });
+    return { shared: shared.status, patch: await patch.json(), erase: await erase.json(),
+      upsert: upsert.status, upload: upload.status, videoDelete: videoDelete.status };
+  }, { otherUid, exerciseId: exRow.id, videoPath: files[0] });
+  ok(isolation.shared === 200, 'second coach can read shared exercises');
+  ok(isolation.patch.length === 0 && isolation.erase.length === 0 && isolation.upsert === 403,
+    'second coach cannot change or delete first coach exercise');
+  ok(isolation.upload === 403 && isolation.videoDelete === 403,
+    'second coach cannot upload to or delete first coach video folder');
+  ok(mock.db.exercises.find(e => e.id === exRow.id)?.data.name === protectedName &&
+     Object.keys(mock.db.files).length === 1, 'cross-coach attempts leave exercise and media untouched');
+
   // Playwright can't read the bytes of an uploaded File body, so check the chain instead:
   // upload -> signed link requested -> the player loads that private link.
   const src = await C.locator('video[controls]').getAttribute('src');

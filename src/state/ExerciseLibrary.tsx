@@ -47,7 +47,7 @@ function migrateV1(): CoachEdits {
 const ExerciseLibraryContext = createContext<ExerciseLibraryValue | null>(null);
 
 export const ExerciseLibraryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { status } = useSession();
+  const { status, profile } = useSession();
   const cloud = status !== 'local';
   const [localEdits, setLocalEdits] = usePersistentState<CoachEdits>('pf.exercises.v2', migrateV1);
   const [cloudEdits, setCloudEdits] = useState<CoachEdits>({ edits: {} });
@@ -56,15 +56,22 @@ export const ExerciseLibraryProvider: React.FC<{ children: React.ReactNode }> = 
 
   // Cloud: the coach's exercises live in the database (everyone signed in can read them).
   useEffect(() => {
-    if (!supabase || status !== 'ready') return;
+    if (!supabase || status !== 'ready' || !profile?.id) {
+      setCloudEdits({ edits: {} });
+      return;
+    }
+    // Do not keep the previous account's exercise cache after a sign-out/user switch.
+    setCloudEdits({ edits: {} });
     let cancelled = false;
     supabase
       .from('exercises')
-      .select('id, data')
+      .select('id, data, owner_id')
       .then(({ data }) => {
         if (cancelled || !data) return;
         const edits: Record<string, Exercise> = {};
-        for (const r of data as { id: string; data: Exercise }[]) edits[r.id] = { ...r.data, id: r.id };
+        for (const r of data as { id: string; data: Exercise; owner_id: string | null }[]) {
+          edits[r.id] = { ...r.data, id: r.id, ownerId: r.owner_id ?? undefined };
+        }
         setCloudEdits({ edits });
       });
     const channel = supabase
@@ -80,11 +87,12 @@ export const ExerciseLibraryProvider: React.FC<{ children: React.ReactNode }> = 
           });
           return;
         }
-        const r = payload.new as { id: string; data: Exercise };
+        const r = payload.new as { id: string; data: Exercise; owner_id: string | null };
+        const exercise = { ...r.data, id: r.id, ownerId: r.owner_id ?? undefined };
         setCloudEdits((c) =>
-          stableStringify(c.edits[r.id]) === stableStringify({ ...r.data, id: r.id })
+          stableStringify(c.edits[r.id]) === stableStringify(exercise)
             ? c
-            : { edits: { ...c.edits, [r.id]: { ...r.data, id: r.id } } }
+            : { edits: { ...c.edits, [r.id]: exercise } }
         );
       })
       .subscribe();
@@ -92,7 +100,7 @@ export const ExerciseLibraryProvider: React.FC<{ children: React.ReactNode }> = 
       cancelled = true;
       void supabase?.removeChannel(channel);
     };
-  }, [status]);
+  }, [status, profile?.id]);
   const [catalog, setCatalog] = useState<Exercise[]>([]);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
 
@@ -146,13 +154,18 @@ export const ExerciseLibraryProvider: React.FC<{ children: React.ReactNode }> = 
   }, [exercises, aliases]);
 
   const saveExercise = async (exercise: Exercise) => {
+    // The ownerId field is UI metadata. Only the server-supplied owner_id column
+    // defines write access. Never copy the owner claim into editable JSON data.
+    const { ownerId: _ownerId, ...payload } = exercise;
+    let saved: Exercise = payload;
     if (cloud && supabase) {
       const { data, error } = await supabase.from('exercises')
-        .upsert({ id: exercise.id, data: exercise }, { onConflict: 'id' }).select('id');
+        .upsert({ id: exercise.id, data: payload }, { onConflict: 'id' }).select('id, owner_id');
       if (error || !data?.length) throw new Error('Exercise was not saved. Check your connection and access.');
+      saved = { ...payload, ownerId: data[0].owner_id };
     }
     // Keep replaced media: existing assessments/workouts may still reference it.
-    setCoach((c) => ({ edits: { ...c.edits, [exercise.id]: exercise } }));
+    setCoach((c) => ({ edits: { ...c.edits, [saved.id]: saved } }));
   };
 
   const deleteExercise = async (id: string) => {
