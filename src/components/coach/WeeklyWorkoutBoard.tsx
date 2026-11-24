@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, Grip, MoveRight, X } from 'lucide-react';
-import type { ClientProfile, Workout } from '../../types';
+import type { ClientProfile } from '../../types';
 import {
   dayShort, effectiveStatus, formatDate, hasResults, orderLabels, parseISODate,
   type WorkoutTransferMode, type WorkoutTransferStatus, workoutOn
@@ -32,6 +32,12 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [replace, setReplace] = useState<PendingReplace | null>(null);
   const [hoverDate, setHoverDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClipboard(null);
+    setReplace(null);
+    setHoverDate(null);
+  }, [client.id]);
 
   const attempt = (fromDate: string, toDate: string, mode: WorkoutTransferMode, confirm = false) => {
     const result = onTransfer(fromDate, toDate, mode, confirm);
