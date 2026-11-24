@@ -27,8 +27,14 @@ async function measure(p) {
     for (const el of document.querySelectorAll('body *')) {
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden') continue;
-      if (/(auto|scroll)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0)
-        scrollers.push(`${label(el)} (${el.scrollWidth}>${el.clientWidth})`);
+      if (/(auto|scroll)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0) {
+        // The seven-day coach calendar is deliberately swipe-scrollable on mobile.
+        // Do not hide other accidental overflow: permit this single named region
+        // only when all seven day columns actually exist.
+        const weeklyCalendar = el.getAttribute('aria-label') === 'Scroll the full seven-day workout calendar' &&
+          el.querySelectorAll('article[aria-label$=" workout"]').length === 7;
+        if (!weeklyCalendar) scrollers.push(`${label(el)} (${el.scrollWidth}>${el.clientWidth})`);
+      }
       const r = el.getBoundingClientRect();
       if (r.width > 0 && r.right > W + 2 && !el.closest('[class*="overflow-x"],[class*="overflow-auto"],[class*="overflow-hidden"]'))
         offRight.push(`${label(el)} right=${Math.round(r.right)}`);
