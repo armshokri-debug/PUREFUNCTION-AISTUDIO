@@ -3,6 +3,8 @@ import { ClientProfile, Workout } from '../../types';
 import {
   addDays,
   copyWeek,
+  customWorkoutBlock,
+  cloneWorkout,
   effectiveStatus,
   lastPerformance,
   migrateClient,
@@ -70,6 +72,29 @@ describe('prescriptions', () => {
       'C1',
       'C2'
     ]);
+  });
+
+  it('prescribes a named exercise without adding it to the exercise library', () => {
+    const block = customWorkoutBlock('  Stability   Ball Body Saw  ');
+    expect(block.name).toBe('Stability Ball Body Saw');
+    expect(block.exerciseId).toBe('manual:stability ball body saw');
+    expect(block.loggedSets).toHaveLength(block.sets);
+    expect(block.loggedSets.every((s) => !s.completed)).toBe(true);
+    expect(customWorkoutBlock('stability ball body saw').exerciseId).toBe(block.exerciseId);
+
+    const original = wo('2026-11-27', { blocks: [block, { ...wo('2026-11-27').blocks[0], supersetWithPrevious: true }] });
+    expect(orderLabels(original.blocks)).toEqual(['A1', 'A2']);
+    const copied = cloneWorkout(original, '2026-12-04');
+    expect(copied.blocks.map((b) => b.exerciseId)).toEqual(original.blocks.map((b) => b.exerciseId));
+    expect(copied.blocks[0].name).toBe(block.name);
+    expect(copied.blocks[1].supersetWithPrevious).toBe(true);
+    expect(copied.blocks[0].id).not.toBe(block.id);
+  });
+
+  it('refuses blank, control-character or oversized custom movement names', () => {
+    for (const bad of ['', '  ', 'x', 'a'.repeat(121), 'Bad\\u0000Name']) {
+      expect(() => customWorkoutBlock(bad.replace('\\u0000', '\u0000'))).toThrow();
+    }
   });
 });
 
