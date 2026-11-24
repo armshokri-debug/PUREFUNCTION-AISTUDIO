@@ -10,6 +10,7 @@ import {
   GripVertical,
   Link2,
   Plus,
+  Play,
   Search,
   Trash2,
   X,
@@ -20,7 +21,7 @@ import type { SyncState } from '../../cloud/useClientsStore';
 import { searchExercises, useExerciseLibrary } from '../../state/ExerciseLibrary';
 import { MUSCLE_GROUPS, equipmentTypeOf, groupOf } from '../../lib/exerciseSearch';
 import { WEIGHT_UNIT, roundLb } from '../../lib/units';
-import { ExerciseThumb } from '../ExerciseMedia';
+import { ExerciseThumb, ExerciseVideoPlayer } from '../ExerciseMedia';
 import { ActionDropdown } from './ActionDropdown';
 import { WeightInput } from '../WeightInput';
 import {
@@ -28,6 +29,7 @@ import {
   blankWorkout,
   copyWeek,
   copyWorkouts,
+  customWorkoutBlock,
   dayShort,
   defaultBlockFor,
   effectiveStatus,
@@ -119,6 +121,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     try { sessionStorage.setItem(`pf.workout.date.${client.id}`, date); } catch { /* storage unavailable */ }
   };
   const [search, setSearch] = useState('');
+  const [videoPreviewId, setVideoPreviewId] = useState<string | null>(null);
   const [bodyPart, setBodyPart] = useState('All');
   const [isDragOver, setIsDragOver] = useState(false);
   const [toast, setToast] = useState<{ text: string; warn?: boolean } | null>(null);
@@ -135,6 +138,10 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     () => searchExercises(exercises, search, { group: bodyPart }),
     [exercises, search, bodyPart]
   );
+  const customName = search.replace(/\s+/g, ' ').trim();
+  const customAvailable = customName.length >= 2 && customName.length <= 120 &&
+    !exercises.some((e) => e.name.trim().toLowerCase() === customName.toLowerCase());
+  const previewExercise = videoPreviewId ? getExercise(videoPreviewId) : undefined;
 
   const flash = (text: string, warn = false) => {
     setToast({ text, warn });
@@ -206,6 +213,19 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     }
     saveWorkout({ ...base, blocks: [...base.blocks, block] });
     flash(`Added ${exercise.name} to ${formatDate(selectedDate, { weekday: true })}`);
+  };
+
+  const addCustomExercise = (name: string) => {
+    try {
+      const block = customWorkoutBlock(name);
+      const latestClient = latestClientRef.current;
+      const base = workoutOn(latestClient, selectedDate) ?? blankWorkout(selectedDate);
+      saveWorkout({ ...base, blocks: [...base.blocks, block] });
+      setSearch('');
+      flash(`Added ${block.name} to this workout (not the shared library)`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Invalid exercise name', true);
+    }
   };
 
   const moveBlock = (index: number, dir: -1 | 1) => {
@@ -663,6 +683,8 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              maxLength={120}
+              aria-label="Search exercises or enter a custom exercise name"
               placeholder="Search name or muscle (try “db press”, “rdl”)…"
               className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-base sm:text-sm text-[#111827] focus:outline-none focus:bg-white focus:border-[#111827]"
             />
@@ -721,6 +743,26 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
           </div>
         </div>
       </div>
+      {previewExercise?.video && (
+        <div role="presentation" className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4"
+          onClick={() => setVideoPreviewId(null)}>
+          <div role="dialog" aria-modal="true" aria-label={`Preview ${previewExercise.name} video`}
+            onClick={(event) => event.stopPropagation()}
+            className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl p-5 max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-base font-bold text-[#111827]">{previewExercise.name}</h3>
+              <button type="button" aria-label="Close video preview" onClick={() => setVideoPreviewId(null)}
+                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <ExerciseVideoPlayer video={previewExercise.video} title={previewExercise.name} className="w-full aspect-video" />
+            {previewExercise.cues.length > 0 && (
+              <div className="mt-3 text-sm text-gray-600">{previewExercise.cues.join(' · ')}</div>
+            )}
+            <button type="button" onClick={() => setVideoPreviewId(null)}
+              className="w-full mt-4 bg-[#111827] text-white text-sm font-semibold py-3 rounded-xl cursor-pointer">Close preview</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
