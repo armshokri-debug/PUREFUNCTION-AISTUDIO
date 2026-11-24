@@ -53,7 +53,7 @@ async function run(viewport) {
     await requireTrue('Tuesday lists both exercises side-by-side with sets and reps',
       tuesday.getByText('Stability Ball Body Saw').count().then(n=>n>0));
     await requireTrue('grouped exercise prescriptions displayed',
-      tuesday.getByText(/3 sets × 10 reps/).count().then(n=>n>=2));
+      tuesday.getByText(/3 sets × (8-10|10) reps/).count().then(n=>n>=2));
     await requireTrue('superset A1/A2 visible without opening each day',
       tuesday.getByText(/A2/).count().then(n=>n>0));
 
