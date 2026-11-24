@@ -23,6 +23,7 @@ import { MUSCLE_GROUPS, equipmentTypeOf, groupOf } from '../../lib/exerciseSearc
 import { WEIGHT_UNIT, roundLb } from '../../lib/units';
 import { ExerciseThumb, ExerciseVideoPlayer } from '../ExerciseMedia';
 import { ActionDropdown } from './ActionDropdown';
+import { WeeklyWorkoutBoard } from './WeeklyWorkoutBoard';
 import { WeightInput } from '../WeightInput';
 import {
   addDays,
@@ -43,6 +44,9 @@ import {
   resizeSets,
   startOfWeek,
   todayISO,
+  transferWorkout,
+  type WorkoutTransferMode,
+  type WorkoutTransferStatus,
   upsertWorkout,
   weekDates,
   workoutOn
@@ -275,6 +279,30 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     setCopyTo(null);
   };
 
+  const handleWeeklyTransfer = (
+    fromDate: string, toDate: string, mode: WorkoutTransferMode, replaceExisting = false
+  ): WorkoutTransferStatus => {
+    if (syncState === 'error' || syncState === 'offline') {
+      flash('Saving is unavailable. Reload or reconnect before moving workouts.', true);
+      return 'blocked-sync';
+    }
+    const result = transferWorkout(latestClientRef.current, fromDate, toDate, mode, replaceExisting);
+    if (result.status === 'done') {
+      commitClient(result.client);
+      flash(`${mode === 'copy' ? 'Copied' : 'Moved'} workout to ${formatDate(toDate, { weekday: true })} · changes saving`);
+    } else if (result.status !== 'destination-occupied') {
+      const explanations: Record<Exclude<WorkoutTransferStatus, 'done' | 'destination-occupied'>, string> = {
+        'same-day': 'Choose another date.',
+        'missing-source': 'The source workout is no longer available.',
+        'source-protected': 'Completed or logged workouts cannot be moved. Use Copy to reuse the plan.',
+        'destination-protected': 'This day has client results and cannot be overwritten.',
+        'blocked-sync': 'Saving is unavailable. Try again after reconnecting.'
+      };
+      flash(explanations[result.status], true);
+    }
+    return result.status;
+  };
+
   const labels = workout ? orderLabels(workout.blocks) : [];
   const status = workout ? effectiveStatus(workout, today) : null;
 
@@ -358,42 +386,17 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
         </div>
       </div>
 
-      {/* Day strip */}
-      <div className="grid grid-cols-7 gap-1.5 sm:gap-2 mb-5">
-        {days.map((d) => {
-          const w = workoutOn(client, d);
-          const st = w ? effectiveStatus(w, today) : null;
-          const selected = d === selectedDate;
-          return (
-            <button
-              key={d}
-              onClick={() => {
-                selectDate(d);
-                setConfirmDelete(false);
-                setCopyTo(null);
-              }}
-              aria-label={formatDate(d, { weekday: true })}
-              aria-pressed={selected}
-              className={`px-1.5 py-2 sm:p-3 rounded-xl sm:rounded-2xl border text-left cursor-pointer min-w-0 ${
-                selected
-                  ? 'bg-[#111827] text-white border-[#111827] shadow-sm'
-                  : 'bg-white text-[#111827] border-gray-100 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[11px] sm:text-xs font-bold">{dayShort(d)}</span>
-                {st && <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_STYLE[st].dot}`} />}
-              </div>
-              <div className={`text-base sm:text-lg font-semibold tabular-nums leading-tight ${d === today && !selected ? 'text-[#B45309]' : ''}`}>
-                {parseISODate(d).getDate()}
-              </div>
-              <div className={`hidden sm:block text-[11px] truncate ${selected ? 'text-gray-300' : 'text-gray-500'}`}>
-                {w ? `${w.blocks.length} exercise${w.blocks.length === 1 ? '' : 's'}` : 'Rest'}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      <WeeklyWorkoutBoard
+        client={client}
+        days={days}
+        selectedDate={selectedDate}
+        onSelectDate={(d) => {
+          selectDate(d);
+          setConfirmDelete(false);
+          setCopyTo(null);
+        }}
+        onTransfer={handleWeeklyTransfer}
+      />
 
       {toast && (
         <div
