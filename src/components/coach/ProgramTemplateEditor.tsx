@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
+import { Link2, Play, X } from 'lucide-react';
 import { ProgramTemplate } from '../../lib/programTemplates';
 import { WEIGHT_UNIT } from '../../lib/units';
 import { orderLabels } from '../../lib/workouts';
 import { WorkoutBlock } from '../../types';
 import { WeightInput } from '../WeightInput';
+import { ExerciseVideoPlayer } from '../ExerciseMedia';
+import { useExerciseLibrary } from '../../state/ExerciseLibrary';
 
 const TEMPLATE_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
@@ -113,6 +116,8 @@ export const ProgramTemplateEditor: React.FC<{
   onCancel: () => void;
 }> = ({ snapshot, saving, error, onSave, onCancel }) => {
   const [draft, setDraft] = useState<ProgramTemplate>(() => cloneTemplate(snapshot));
+  const { getExercise } = useExerciseLibrary();
+  const [previewExerciseId, setPreviewExerciseId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [prevSaving, setPrevSaving] = useState(saving);
@@ -189,6 +194,7 @@ export const ProgramTemplateEditor: React.FC<{
   const visibleServerError = hideServerError ? null : error;
   const displayError = firstFieldError || validationError || visibleServerError;
   const scopeLabel = draft.scope === 'program' ? '12 weeks' : 'One week';
+  const previewExercise = previewExerciseId ? getExercise(previewExerciseId) : undefined;
 
   return (
     <form
@@ -260,6 +266,8 @@ export const ProgramTemplateEditor: React.FC<{
                           ? block.name.trim()
                           : 'Unnamed exercise';
                       const inputPrefix = `${workoutTitle} · ${exName}`;
+                      const isPaired = !!block.supersetWithPrevious;
+                      const startsSuperset = !isPaired && !!blocks[blockIdx + 1]?.supersetWithPrevious;
                       const setsKey = `day-${dayIdx}-block-${blockIdx}-sets`;
                       const restKey = `day-${dayIdx}-block-${blockIdx}-rest`;
                       return (
@@ -267,9 +275,30 @@ export const ProgramTemplateEditor: React.FC<{
                           key={block.id ?? blockIdx}
                           className="rounded-xl bg-white border border-gray-100 p-3 space-y-2.5 min-w-0"
                         >
+                          {startsSuperset && (
+                            <div role="note" className="text-xs font-semibold text-[#92400E] rounded-lg bg-[#FFF4CF] p-2">
+                              Superset {labels[blockIdx].replace(/\d+$/, '')} · Alternate these exercises before resting
+                            </div>
+                          )}
                           <div className="text-xs font-semibold text-[#111827] min-w-0 max-w-full [overflow-wrap:anywhere]">
                             {labels[blockIdx] ? `${labels[blockIdx]}. ` : ''}
                             {exName}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {blockIdx > 0 && (
+                              <button type="button" disabled={saving} onClick={() => updateBlock(dayIdx, blockIdx, { supersetWithPrevious: !isPaired })}
+                                aria-pressed={isPaired} aria-label={`Pair ${exName} with previous exercise`}
+                                className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${isPaired ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-gray-100 text-gray-600'}`}>
+                                <Link2 className="w-3.5 h-3.5" /> {isPaired ? 'Unpair' : 'Pair with previous (superset)'}
+                              </button>
+                            )}
+                            {getExercise(block.exerciseId)?.video && (
+                              <button type="button" onClick={() => setPreviewExerciseId(block.exerciseId)}
+                                aria-label={`Preview ${exName} video`}
+                                className="inline-flex items-center gap-1 rounded-lg bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-700">
+                                <Play className="w-3.5 h-3.5" /> Preview video
+                              </button>
+                            )}
                           </div>
 
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 min-w-0">
@@ -378,6 +407,21 @@ export const ProgramTemplateEditor: React.FC<{
           Cancel
         </button>
       </div>
+      {previewExercise?.video && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4"
+          onClick={() => setPreviewExerciseId(null)}>
+          <div role="dialog" aria-modal="true" aria-label={`Preview ${previewExercise.name} video`}
+            onClick={(event) => event.stopPropagation()}
+            className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl p-5 max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-[#111827]">{previewExercise.name}</h3>
+              <button type="button" aria-label="Close video preview" onClick={() => setPreviewExerciseId(null)} className="p-2 rounded-lg text-gray-500"><X className="w-5 h-5" /></button>
+            </div>
+            <ExerciseVideoPlayer video={previewExercise.video} title={previewExercise.name} className="w-full aspect-video" />
+            <button type="button" onClick={() => setPreviewExerciseId(null)} className="w-full mt-4 rounded-xl bg-[#111827] py-3 text-sm font-semibold text-white">Close preview</button>
+          </div>
+        </div>
+      )}
     </form>
   );
 };
