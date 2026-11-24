@@ -107,7 +107,7 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
     const target = parseReps(currentBlock.reps);
     const reps = currentSet.reps ?? (target.kind === 'reps' && target.max > 0 ? target.max : target.kind === 'time' ? target.min : null);
     patchSet(currentBlock, currentSet.setNumber, { completed: true, reps, kg: currentSet.kg ?? (currentBlock.loadKg || 0) });
-    if (currentBlock.restSec > 0) {
+    if (currentBlock.restSec > 0 && restAfterExercise(currentWorkout?.blocks ?? [], currentBlock.id)) {
       setRest({ endsAt: Date.now() + currentBlock.restSec * 1000, total: currentBlock.restSec });
       setNow(Date.now());
     }
