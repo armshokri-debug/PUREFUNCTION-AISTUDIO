@@ -490,7 +490,17 @@ async function measureOverflow(page) {
   templateGetMode = 'ok';
 
   const toggle = page.getByRole('button', { name: /Show preview|Hide preview/ });
-  const openTemplateActions = async () => page.getByRole('button', { name: 'Template actions' }).click();
+  const openTemplateActions = async () => {
+    await page.getByRole('button', { name: 'Template actions' }).click();
+    const menu = page.getByRole('menu', { name: 'Template actions' });
+    await menu.waitFor({ state: 'visible' });
+    const fits = await menu.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return r.left >= -1 && r.right <= document.documentElement.clientWidth + 1 &&
+        r.top >= -1 && r.bottom <= window.innerHeight + 1 && r.bottom > r.top;
+    });
+    if (!fits) throw new Error('Template action menu clipped by viewport');
+  };
   ok((await toggle.getAttribute('aria-expanded')) === 'false', 'preview starts collapsed (aria-expanded=false)');
   ok((await page.locator('#program-template-preview').count()) === 0, 'preview region not rendered initially');
   const toggleBox = await toggle.boundingBox();
