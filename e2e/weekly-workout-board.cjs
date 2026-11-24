@@ -78,7 +78,7 @@ async function run(viewport) {
     await requireTrue('move clears Friday only', friday.getByText('No workout planned').isVisible());
 
     await tuesday.getByRole('button',{name:/Move Tue /}).click();
-    await thursday.getByRole('button',{name:/Paste move to Thu,/}).click();
+    await thursday.getByRole('button',{name:/Paste move to Thu /}).click();
     const confirm=page.getByRole('dialog',{name:'Replace existing planned workout'});
     await confirm.waitFor();
     await requireTrue('occupied target requires confirmation', confirm.getByRole('button',{name:'Replace plan'}).isVisible());
