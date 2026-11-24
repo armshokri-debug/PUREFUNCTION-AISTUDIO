@@ -120,6 +120,26 @@ export function orderLabels(blocks: Pick<WorkoutBlock, 'supersetWithPrevious'>[]
   });
 }
 
+/** Shared presentation model: the first exercise is a member of its group too. */
+export function workoutExerciseGroups(blocks: Pick<WorkoutBlock, 'supersetWithPrevious'>[]) {
+  const labels = orderLabels(blocks);
+  return blocks.map((_, index) => {
+    let start = index;
+    while (start > 0 && blocks[start].supersetWithPrevious) start--;
+    let end = index;
+    while (end + 1 < blocks.length && blocks[end + 1].supersetWithPrevious) end++;
+    const groupSize = end - start + 1;
+    return {
+      label: labels[index],
+      groupLabel: labels[start].replace(/\d+$/, ''),
+      groupSize,
+      isPaired: index > start,
+      startsSuperset: index === start && groupSize > 1,
+      inSuperset: groupSize > 1
+    };
+  });
+}
+
 export function emptySets(count: number, kg: number | null): SetLog[] {
   return Array.from({ length: Math.max(0, count) }, (_, i) => ({
     setNumber: i + 1,
