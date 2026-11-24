@@ -10,6 +10,7 @@ import {
   GripVertical,
   Link2,
   Plus,
+  Play,
   Search,
   Trash2,
   X,
@@ -20,7 +21,7 @@ import type { SyncState } from '../../cloud/useClientsStore';
 import { searchExercises, useExerciseLibrary } from '../../state/ExerciseLibrary';
 import { MUSCLE_GROUPS, equipmentTypeOf, groupOf } from '../../lib/exerciseSearch';
 import { WEIGHT_UNIT, roundLb } from '../../lib/units';
-import { ExerciseThumb } from '../ExerciseMedia';
+import { ExerciseThumb, ExerciseVideoPlayer } from '../ExerciseMedia';
 import { ActionDropdown } from './ActionDropdown';
 import { WeightInput } from '../WeightInput';
 import {
@@ -28,6 +29,7 @@ import {
   blankWorkout,
   copyWeek,
   copyWorkouts,
+  customWorkoutBlock,
   dayShort,
   defaultBlockFor,
   effectiveStatus,
@@ -119,6 +121,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     try { sessionStorage.setItem(`pf.workout.date.${client.id}`, date); } catch { /* storage unavailable */ }
   };
   const [search, setSearch] = useState('');
+  const [videoPreviewId, setVideoPreviewId] = useState<string | null>(null);
   const [bodyPart, setBodyPart] = useState('All');
   const [isDragOver, setIsDragOver] = useState(false);
   const [toast, setToast] = useState<{ text: string; warn?: boolean } | null>(null);
@@ -135,6 +138,10 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     () => searchExercises(exercises, search, { group: bodyPart }),
     [exercises, search, bodyPart]
   );
+  const customName = search.replace(/\s+/g, ' ').trim();
+  const customAvailable = customName.length >= 2 && customName.length <= 120 &&
+    !exercises.some((e) => e.name.trim().toLowerCase() === customName.toLowerCase());
+  const previewExercise = videoPreviewId ? getExercise(videoPreviewId) : undefined;
 
   const flash = (text: string, warn = false) => {
     setToast({ text, warn });
@@ -206,6 +213,19 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     }
     saveWorkout({ ...base, blocks: [...base.blocks, block] });
     flash(`Added ${exercise.name} to ${formatDate(selectedDate, { weekday: true })}`);
+  };
+
+  const addCustomExercise = (name: string) => {
+    try {
+      const block = customWorkoutBlock(name);
+      const latestClient = latestClientRef.current;
+      const base = workoutOn(latestClient, selectedDate) ?? blankWorkout(selectedDate);
+      saveWorkout({ ...base, blocks: [...base.blocks, block] });
+      setSearch('');
+      flash(`Added ${block.name} to this workout (not the shared library)`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Invalid exercise name', true);
+    }
   };
 
   const moveBlock = (index: number, dir: -1 | 1) => {
@@ -483,14 +503,21 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                 {workout.blocks.map((b, i) => {
                   const last = lastPerformance(client, b.exerciseId, selectedDate);
                   const done = b.loggedSets.filter((s) => s.completed);
-                  const isPaired = b.supersetWithPrevious;
+                  const isPaired = !!b.supersetWithPrevious;
+                  const startsSuperset = !isPaired && !!workout.blocks[i + 1]?.supersetWithPrevious;
+                  const inSuperset = isPaired || startsSuperset;
                   return (
                     <div
                       key={b.id}
                       className={`rounded-2xl border p-3.5 sm:p-4 ${b.pain ? 'border-[#FCA5A5] bg-[#FFF7F7]' : 'border-gray-200'} ${
-                        isPaired ? 'ml-3 sm:ml-5 border-l-4 border-l-[#FFC809]' : ''
+                        inSuperset ? 'border-l-4 border-l-[#FFC809] bg-[#FFFDF5]/40' : ''
                       }`}
                     >
+                      {startsSuperset && (
+                        <div className="mb-3 rounded-lg bg-[#FFF4CF] px-3 py-2 text-xs font-semibold text-[#92400E]" role="note">
+                          Superset {labels[i].replace(/\d+$/, '')} · Alternate these exercises before resting
+                        </div>
+                      )}
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="flex items-start gap-2.5 min-w-0">
                           <span className="min-w-7 h-7 px-1.5 rounded-lg bg-[#111827] text-[#FFC809] text-xs font-bold flex items-center justify-center shrink-0">
@@ -498,6 +525,8 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                           </span>
                           <div className="min-w-0">
                             <div className="text-sm sm:text-base font-semibold text-[#111827] leading-snug">{b.name}</div>
+                            {inSuperset && <div className="text-[11px] text-[#92400E] font-semibold mt-0.5">{isPaired ? 'Paired with previous exercise' : 'Superset starts here'}</div>}
+                            {b.exerciseId.startsWith('manual:') && <div className="text-[11px] text-gray-500 mt-0.5">Custom workout exercise</div>}
                             {last && (
                               <div className="text-[11px] text-gray-500 mt-0.5">
                                 Last ({formatDate(last.date)}): {formatPerformance(last)}
@@ -512,9 +541,17 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                               onClick={() => patchBlock(b.id, { supersetWithPrevious: !b.supersetWithPrevious })}
                               title={isPaired ? 'Unpair from previous exercise' : 'Pair with previous exercise (superset)'}
                               aria-label="Superset with previous"
-                              className={`p-1.5 rounded-lg cursor-pointer ${isPaired ? 'text-[#B45309] bg-[#FEF3C7]' : 'text-gray-400 hover:text-[#111827]'}`}
+                              className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer ${isPaired ? 'text-[#92400E] bg-[#FEF3C7]' : 'text-gray-600 hover:bg-[#FEF3C7] hover:text-[#92400E]'}`}
                             >
                               <Link2 className="w-4 h-4" />
+                              <span className="text-[11px] font-semibold">{isPaired ? 'Unpair' : 'Pair'}</span>
+                            </button>
+                          )}
+                          {getExercise(b.exerciseId)?.video && (
+                            <button type="button" onClick={() => setVideoPreviewId(b.exerciseId)}
+                              aria-label={`Preview ${b.name} video`}
+                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100 cursor-pointer">
+                              <Play className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Video</span>
                             </button>
                           )}
                           <button onClick={() => moveBlock(i, -1)} disabled={i === 0} aria-label="Move up" className="p-1.5 rounded-lg text-gray-400 hover:text-[#111827] disabled:opacity-30 cursor-pointer">
@@ -663,6 +700,8 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              maxLength={120}
+              aria-label="Search exercises or enter a custom exercise name"
               placeholder="Search name or muscle (try “db press”, “rdl”)…"
               className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-base sm:text-sm text-[#111827] focus:outline-none focus:bg-white focus:border-[#111827]"
             />
@@ -682,6 +721,16 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             ))}
           </div>
 
+            {customAvailable && (
+              <button type="button" onClick={() => addCustomExercise(customName)}
+                className="w-full mt-2 rounded-xl border border-dashed border-[#D6AC32] bg-[#FFFDF5] p-3 text-left hover:border-[#92400E] cursor-pointer"
+                aria-label={`Add custom exercise ${customName}`}>
+                <span className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <Plus className="w-4 h-4 text-[#92400E]" /> Add “{customName}” as a custom exercise
+                </span>
+                <span className="mt-1 block text-xs text-gray-600">Saved in this workout only — no library entry required.</span>
+              </button>
+            )}
           <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 -mr-1">
             {results.slice(0, LIST_LIMIT).map((ex) => (
               <div
@@ -703,6 +752,13 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                     </div>
                   </div>
                 </div>
+                {ex.video && (
+                  <button type="button" onClick={() => setVideoPreviewId(ex.id)}
+                    aria-label={`Preview ${ex.name} video`}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 cursor-pointer shrink-0">
+                    <Play className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Preview</span>
+                  </button>
+                )}
                 <button
                   onClick={() => addExercise(ex)}
                   aria-label={`Add ${ex.name}`}
@@ -721,6 +777,26 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
           </div>
         </div>
       </div>
+      {previewExercise?.video && (
+        <div role="presentation" className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4"
+          onClick={() => setVideoPreviewId(null)}>
+          <div role="dialog" aria-modal="true" aria-label={`Preview ${previewExercise.name} video`}
+            onClick={(event) => event.stopPropagation()}
+            className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl p-5 max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-base font-bold text-[#111827]">{previewExercise.name}</h3>
+              <button type="button" aria-label="Close video preview" onClick={() => setVideoPreviewId(null)}
+                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <ExerciseVideoPlayer video={previewExercise.video} title={previewExercise.name} className="w-full aspect-video" />
+            {previewExercise.cues.length > 0 && (
+              <div className="mt-3 text-sm text-gray-600">{previewExercise.cues.join(' · ')}</div>
+            )}
+            <button type="button" onClick={() => setVideoPreviewId(null)}
+              className="w-full mt-4 bg-[#111827] text-white text-sm font-semibold py-3 rounded-xl cursor-pointer">Close preview</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
