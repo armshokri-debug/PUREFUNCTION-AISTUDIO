@@ -721,6 +721,16 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             ))}
           </div>
 
+            {customAvailable && (
+              <button type="button" onClick={() => addCustomExercise(customName)}
+                className="w-full mt-2 rounded-xl border border-dashed border-[#D6AC32] bg-[#FFFDF5] p-3 text-left hover:border-[#92400E] cursor-pointer"
+                aria-label={`Add custom exercise ${customName}`}>
+                <span className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <Plus className="w-4 h-4 text-[#92400E]" /> Add “{customName}” as a custom exercise
+                </span>
+                <span className="mt-1 block text-xs text-gray-600">Saved in this workout only — no library entry required.</span>
+              </button>
+            )}
           <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 -mr-1">
             {results.slice(0, LIST_LIMIT).map((ex) => (
               <div
@@ -758,16 +768,6 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                 </button>
               </div>
             ))}
-            {customAvailable && (
-              <button type="button" onClick={() => addCustomExercise(customName)}
-                className="w-full mt-2 rounded-xl border border-dashed border-[#D6AC32] bg-[#FFFDF5] p-3 text-left hover:border-[#92400E] cursor-pointer"
-                aria-label={`Add custom exercise ${customName}`}>
-                <span className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
-                  <Plus className="w-4 h-4 text-[#92400E]" /> Add “{customName}” as a custom exercise
-                </span>
-                <span className="mt-1 block text-xs text-gray-600">Saved in this workout only — no library entry required.</span>
-              </button>
-            )}
             {results.length > LIST_LIMIT && (
               <p className="text-[11px] text-gray-400 text-center py-2">
                 Showing {LIST_LIMIT} of {results.length.toLocaleString()} — search to narrow down
