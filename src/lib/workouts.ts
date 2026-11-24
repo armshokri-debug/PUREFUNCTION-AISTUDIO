@@ -157,6 +157,25 @@ export function defaultBlockFor(exercise: Exercise): WorkoutBlock {
   };
 }
 
+
+/** A free-text exercise lives in the workout itself; it is not added to the
+ * coach's shared exercise library. Deterministic names keep workout history
+ * meaningful across sessions and copied workout dates. */
+export function customWorkoutBlock(input: string): WorkoutBlock {
+  const name = input.replace(/\s+/g, ' ').trim();
+  if (name.length < 2 || name.length > 120 || /[\u0000-\u001F\u007F]/.test(input)) {
+    throw new Error('Enter a movement name between 2 and 120 characters.');
+  }
+  const exercise: Exercise = {
+    id: `manual:${name.toLocaleLowerCase('en-US')}`,
+    name,
+    bodyPart: 'Full Body',
+    equipment: 'Other',
+    cues: []
+  };
+  return defaultBlockFor(exercise);
+}
+
 export function blankWorkout(date: string): Workout {
   return { id: newId('wo'), date, title: 'Workout', focus: '', blocks: [], status: 'planned' };
 }
