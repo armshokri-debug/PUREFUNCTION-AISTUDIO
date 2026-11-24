@@ -936,14 +936,14 @@ async function measureOverflow(page) {
   await page.getByRole('button', { name: labelDate(destWed) }).click();
   ok(
     (await page.getByLabel('Workout title').inputValue()) === 'Lifecycle Pull B' &&
-      (await page.getByText('Chest Supported Row').isVisible()),
+      (await page.getByText('Chest Supported Row', { exact: true }).isVisible()),
     'lifecycle: applied workout remains visible in UI after reload'
   );
 
   await page.getByRole('button', { name: labelDate(destMon) }).click();
   ok(
     (await page.getByLabel('Workout title').inputValue()) === 'Completed Benchmark' &&
-      (await page.getByText('Recorded Bench Press').isVisible()) &&
+      (await page.getByText('Recorded Bench Press', { exact: true }).isVisible()) &&
       (await page.getByText('PR day').isVisible()) &&
       (await page.getByLabel('Workout status').inputValue()) === 'completed',
     'lifecycle: completed workout and logged results remain visible in UI after reload'
@@ -954,7 +954,7 @@ async function measureOverflow(page) {
   await page.getByRole('button', { name: labelDate(destWed) }).click();
   ok(
     (await page.getByLabel('Workout title').inputValue()) === 'Unselected Original Session' &&
-      (await page.getByText('Unselected Mobility Drill').isVisible()),
+      (await page.getByText('Unselected Mobility Drill', { exact: true }).isVisible()),
     'lifecycle: unselected client remains unchanged in UI after reload'
   );
 
