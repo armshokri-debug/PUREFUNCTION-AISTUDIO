@@ -288,6 +288,53 @@ export function copyWorkouts(client: ClientProfile, pairs: { from: Workout; toDa
   return { client: next, copied, skipped };
 }
 
+/**
+ * Transfer a single scheduled workout between calendar days.
+ *
+ * Refuses to erase logged results or silently replace an existing planned day.
+ * Moving a workout keeps its stable ID (the cloud UPDATE changes only its date).
+ * Copying creates independent IDs and clears client logs, while preserving all
+ * exercise prescriptions, notes, loads, rep targets and superset links.
+ */
+export type WorkoutTransferMode = 'move' | 'copy';
+export type WorkoutTransferStatus =
+  | 'done' | 'same-day' | 'missing-source' | 'source-protected'
+  | 'destination-protected' | 'destination-occupied';
+
+export interface WorkoutTransferResult {
+  client: ClientProfile;
+  status: WorkoutTransferStatus;
+}
+
+export function transferWorkout(
+  client: ClientProfile,
+  sourceDate: string,
+  targetDate: string,
+  mode: WorkoutTransferMode,
+  replaceExisting = false
+): WorkoutTransferResult {
+  if (sourceDate === targetDate) return { client, status: 'same-day' };
+  const source = workoutOn(client, sourceDate);
+  if (!source) return { client, status: 'missing-source' };
+  if (mode === 'move' && (hasResults(source) || source.status !== 'planned')) {
+    return { client, status: 'source-protected' };
+  }
+  const existing = workoutOn(client, targetDate);
+  if (existing && hasResults(existing)) return { client, status: 'destination-protected' };
+  if (existing && !replaceExisting) return { client, status: 'destination-occupied' };
+
+  const targetWorkout: Workout = mode === 'copy'
+    ? { ...cloneWorkout(source, targetDate), ...(existing ? { id: existing.id } : {}) }
+    : { ...source, date: targetDate };
+  const remaining = (client.workouts ?? []).filter((w) =>
+    w.id !== existing?.id && !(mode === 'move' && w.id === source.id)
+  );
+  return {
+    client: { ...client, workouts: sortByDate([...remaining, targetWorkout]) },
+    status: 'done'
+  };
+}
+
 export function copyWeek(client: ClientProfile, fromWeekStart: string, toWeekStart: string): CopyResult {
   const days = weekDates(fromWeekStart);
   const pairs = days
