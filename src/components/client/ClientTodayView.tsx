@@ -290,10 +290,17 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
               const target = parseReps(block.reps);
               const anyDone = block.loggedSets.some((s) => s.completed);
               const allDone = block.loggedSets.length > 0 && block.loggedSets.every((s) => s.completed);
-              const paired = block.supersetWithPrevious;
+              const paired = !!block.supersetWithPrevious;
+              const startsSuperset = !paired && !!workout.blocks[i + 1]?.supersetWithPrevious;
+              const inSuperset = paired || startsSuperset;
 
               return (
-                <div key={block.id} className={`${card} ${paired ? 'border-l-4 border-l-[#FFC809]' : ''} ${allDone ? 'opacity-90' : ''}`}>
+                <div key={block.id} className={`${card} ${inSuperset ? 'border-l-4 border-l-[#FFC809]' : ''} ${allDone ? 'opacity-90' : ''}`}>
+                  {startsSuperset && (
+                    <div role="note" className="mb-3 rounded-xl bg-[#FFF4CF] px-3 py-2 text-xs font-semibold text-[#92400E]">
+                      Superset {labels[i].replace(/\d+$/, '')} · Alternate these exercises before resting
+                    </div>
+                  )}
                   {/* Header */}
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="flex items-start gap-2.5 min-w-0">
@@ -310,17 +317,21 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
                           {block.sets} × {block.reps || '–'}
                           {block.loadKg > 0 ? ` @ ${formatWeight(block.loadKg)}` : ''}
                           {block.restSec ? ` · ${block.restSec}s rest` : ''}
-                          {paired ? ' · superset' : ''}
+                          {inSuperset ? ' · superset' : ''}
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setVideoFor(block.exerciseId)}
-                      className="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-[#111827] text-xs font-medium px-2.5 py-2 rounded-lg cursor-pointer shrink-0"
-                    >
-                      <Play className="w-3 h-3 fill-[#111827]" />
-                      <span>Demo</span>
-                    </button>
+                    {exercise?.video ? (
+                      <button
+                        onClick={() => setVideoFor(block.exerciseId)}
+                        className="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-[#111827] text-xs font-medium px-2.5 py-2 rounded-lg cursor-pointer shrink-0"
+                      >
+                        <Play className="w-3 h-3 fill-[#111827]" />
+                        <span>Demo</span>
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-gray-400 shrink-0">No demo video</span>
+                    )}
                   </div>
 
                   {block.notes && (
