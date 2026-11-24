@@ -41,9 +41,11 @@ async function run(viewport) {
     await search.fill('1 arm row with rotation');
     await p.getByRole('button', { name: 'Add 1 arm row with rotation', exact:true }).waitFor();
     await p.getByRole('button', { name: 'Add 1 arm row with rotation', exact:true }).click();
-    await p.getByRole('button', { name: 'Superset with previous' }).click();
-    await check('superset grouping is visible to the coach', p.getByText(/Superset A · Alternate these exercises before resting/).isVisible());
-    await check('paired movement labelled correctly', p.getByText('Paired with previous exercise').isVisible());
+    const pairedBefore = await p.getByText('Paired with previous exercise', {exact:true}).count();
+    await p.getByRole('button', { name: 'Superset with previous' }).last().click();
+    const pairedAfter = await p.getByText('Paired with previous exercise', {exact:true}).count();
+    await check('newly appended movement can join a superset', Promise.resolve(pairedAfter === pairedBefore + 1));
+    await check('superset grouping is visible to the coach', p.getByText(/Superset [A-Z] · Alternate these exercises before resting/).first().isVisible());
 
     await p.getByRole('button', {name:'Preview 1 arm row with rotation video'}).first().click();
     const modal = p.getByRole('dialog', {name:'Preview 1 arm row with rotation video'});
@@ -55,7 +57,8 @@ async function run(viewport) {
     await p.reload();
     await openBuilder(p);
     await check('custom exercise persists after reload', p.getByText('Stability Ball Body Saw',{exact:true}).first().isVisible());
-    await check('superset pairing persists after reload', p.getByText('Paired with previous exercise').isVisible());
+    await check('superset pairing persists after reload',
+      p.getByText('Paired with previous exercise', {exact:true}).count().then((count) => count === pairedAfter));
     const width = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     await check(`no horizontal overflow at ${viewport.width}px`, Promise.resolve(width <= 1));
     await check('no JavaScript errors', Promise.resolve(errors.length === 0));
