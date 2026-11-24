@@ -25,6 +25,7 @@ jobs:
       - run: node e2e/responsive-check.cjs dist
       - run: node e2e/library.cjs dist
       - run: node e2e/trainer-builder.cjs dist
+      - run: node e2e/weekly-workout-board.cjs dist
       - run: node e2e/pwa.cjs dist
       - run: npx vite build --outDir dist-cloud --base=/
         env:

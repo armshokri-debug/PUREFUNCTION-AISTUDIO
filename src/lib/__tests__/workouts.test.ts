@@ -14,6 +14,8 @@ import {
   startOfWeek,
   suggestLoad,
   upsertWorkout,
+  transferWorkout,
+  workoutOn,
   weekDates
 } from '../workouts';
 import { parseVideoLink } from '../media';
@@ -225,6 +227,79 @@ describe('history & copying', () => {
     expect(mon.id).not.toBe('w-2026-10-19');
     expect(mon.blocks[0].loggedSets.every((s) => !s.completed)).toBe(true);
     expect(r.client.workouts!.find((w) => w.date === '2026-10-28')!.status).toBe('completed');
+  });
+
+  it('moves a planned workout to an empty day without losing its prescription or ID', () => {
+    const source = wo('2026-11-24', {
+      title: 'Lower + stability',
+      focus: 'Strength',
+      coachNotes: 'Follow A1/A2 in order',
+      durationMin: 50,
+      blocks: [
+        { ...wo('2026-11-24').blocks[0], notes: 'Control the tempo', restSec: 75 },
+        { ...wo('2026-11-24').blocks[0], id: 'b-a2', name: 'Stability Ball Body Saw', exerciseId: 'manual:stability ball body saw', sets: 4, reps: '12-15', loadKg: 0, notes: 'Superset with squat', supersetWithPrevious: true }
+      ]
+    });
+    const base = upsertWorkout(baseClient, source);
+    const result = transferWorkout(base, '2026-11-24', '2026-11-26', 'move');
+    expect(result.status).toBe('done');
+    expect(workoutOn(result.client, '2026-11-24')).toBeUndefined();
+    expect(workoutOn(result.client, '2026-11-26')).toEqual({ ...source, date: '2026-11-26' });
+    expect(workoutOn(base, '2026-11-24')).toEqual(source);
+    expect(result.client.workouts).toHaveLength(1);
+  });
+
+  it('copies a full workout independently without altering source prescriptions or copying results', () => {
+    const source = wo('2026-11-24', {
+      coachNotes: 'Keep shoulders stable',
+      durationMin: 40,
+      blocks: [
+        { ...wo('2026-11-24').blocks[0], notes: 'Use controlled reps', loggedSets: [{setNumber:1,kg:30,reps:10,completed:true},{setNumber:2,kg:30,reps:null,completed:false},{setNumber:3,kg:30,reps:null,completed:false}] },
+        { ...wo('2026-11-24').blocks[0], id: 'superset-next', supersetWithPrevious: true, notes: 'Alternate sets' }
+      ]
+    });
+    const base = upsertWorkout(baseClient, source);
+    const result = transferWorkout(base, '2026-11-24', '2026-11-26', 'copy');
+    expect(result.status).toBe('done');
+    const copied = workoutOn(result.client, '2026-11-26')!;
+    expect(workoutOn(result.client, '2026-11-24')).toEqual(source);
+    expect(copied.id).not.toBe(source.id);
+    expect(copied.blocks.map(b => b.id)).not.toEqual(source.blocks.map(b => b.id));
+    expect(copied.blocks.map(b => [b.exerciseId,b.name,b.sets,b.reps,b.loadKg,b.restSec,b.notes,b.supersetWithPrevious]))
+      .toEqual(source.blocks.map(b => [b.exerciseId,b.name,b.sets,b.reps,b.loadKg,b.restSec,b.notes,b.supersetWithPrevious]));
+    expect(copied.blocks.flatMap(b => b.loggedSets).every(s => !s.completed && s.reps === null)).toBe(true);
+    expect(copied.coachNotes).toBe(source.coachNotes);
+    expect(copied.durationMin).toBe(source.durationMin);
+  });
+
+  it('requires confirmation before replacing a planned day, preserving destination ID for copies', () => {
+    const source = wo('2026-11-24', { title: 'Source' });
+    const existing = wo('2026-11-26', { title: 'Do not overwrite' });
+    const base = upsertWorkout(upsertWorkout(baseClient, source), existing);
+    const guard = transferWorkout(base, source.date, existing.date, 'copy');
+    expect(guard.status).toBe('destination-occupied');
+    expect(guard.client).toBe(base);
+    const confirmed = transferWorkout(base, source.date, existing.date, 'copy', true);
+    expect(confirmed.status).toBe('done');
+    expect(workoutOn(confirmed.client, existing.date)?.title).toBe('Source');
+    expect(workoutOn(confirmed.client, existing.date)?.id).toBe(existing.id);
+    expect(workoutOn(confirmed.client, source.date)).toEqual(source);
+  });
+
+  it('never replaces logged destinations or moves completed/partially logged source workouts', () => {
+    const source = wo('2026-11-24');
+    const logged = wo('2026-11-26', { blocks: [{...wo('2026-11-26').blocks[0], loggedSets: [{setNumber:1,kg:30,reps:10,completed:true}]}] });
+    const base = upsertWorkout(upsertWorkout(baseClient, source), logged);
+    for (const replaceExisting of [false, true]) {
+      expect(transferWorkout(base, source.date, logged.date, 'move', replaceExisting)).toEqual({client:base,status:'destination-protected'});
+      expect(transferWorkout(base, source.date, logged.date, 'copy', replaceExisting)).toEqual({client:base,status:'destination-protected'});
+    }
+    const completed = upsertWorkout(baseClient, wo('2026-11-24', {status:'completed'}));
+    expect(transferWorkout(completed,'2026-11-24','2026-11-26','move').status).toBe('source-protected');
+    const partial = upsertWorkout(baseClient, wo('2026-11-24', { blocks: [{...wo('2026-11-24').blocks[0], loggedSets: [{setNumber:1,kg:30,reps:9,completed:false}]}] }));
+    expect(transferWorkout(partial,'2026-11-24','2026-11-26','move').status).toBe('source-protected');
+    expect(transferWorkout(base,'2026-11-24','2026-11-24','copy').status).toBe('same-day');
+    expect(transferWorkout(base,'2026-11-23','2026-11-25','move').status).toBe('missing-source');
   });
 
   it('one workout per day', () => {
