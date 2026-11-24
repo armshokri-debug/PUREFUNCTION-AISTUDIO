@@ -75,6 +75,18 @@ describe('prescriptions', () => {
     ]);
   });
 
+  it('waits until the final superset exercise before starting the rest timer', () => {
+    const blocks = [
+      { id: 'a1' }, { id: 'a2', supersetWithPrevious: true },
+      { id: 'a3', supersetWithPrevious: true }, { id: 'b' }
+    ];
+    expect(restAfterExercise(blocks, 'a1')).toBe(false);
+    expect(restAfterExercise(blocks, 'a2')).toBe(false);
+    expect(restAfterExercise(blocks, 'a3')).toBe(true);
+    expect(restAfterExercise(blocks, 'b')).toBe(true);
+    expect(restAfterExercise(blocks, 'not-present')).toBe(false);
+  });
+
   it('prescribes a named exercise without adding it to the exercise library', () => {
     const block = customWorkoutBlock('  Stability   Ball Body Saw  ');
     expect(block.name).toBe('Stability Ball Body Saw');
