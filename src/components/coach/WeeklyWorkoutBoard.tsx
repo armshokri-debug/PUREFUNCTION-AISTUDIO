@@ -83,6 +83,7 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
             const movingBlocked = Boolean(workout && (logged || workout.status !== 'planned'));
             const selected = date === selectedDate;
             const hovered = date === hoverDate;
+            const shortDate = `${dayShort(date)} ${formatDate(date)}`;
             return (
               <article key={date}
                 aria-label={`${formatDate(date, { weekday: true })} workout`}
@@ -148,14 +149,14 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                 <div className="mt-3 pt-2 border-t border-gray-100 space-y-1.5">
                   {workout && (
                     <div className="grid grid-cols-2 gap-1">
-                      <button type="button" aria-label={`Copy ${formatDate(date, { weekday: true })} workout`}
+                      <button type="button" aria-label={`Copy ${shortDate} workout`}
                         onClick={() => setClipboard({ fromDate: date, mode: 'copy' })}
                         className="min-h-[34px] inline-flex items-center justify-center gap-1 rounded-lg bg-gray-100 text-[#111827] text-[11px] font-semibold hover:bg-gray-200 cursor-pointer">
                         <Copy className="w-3 h-3" /> Copy
                       </button>
                       <button type="button" disabled={movingBlocked}
                         title={movingBlocked ? 'Completed or logged workouts cannot be moved' : 'Move this workout'}
-                        aria-label={`Move ${formatDate(date, { weekday: true })} workout`}
+                        aria-label={`Move ${shortDate} workout`}
                         onClick={() => setClipboard({ fromDate: date, mode: 'move' })}
                         className="min-h-[34px] inline-flex items-center justify-center gap-1 rounded-lg bg-gray-100 text-[#111827] text-[11px] font-semibold hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
                         <MoveRight className="w-3 h-3" /> Move
@@ -164,14 +165,14 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                   )}
                   {clipboard && clipboard.fromDate !== date && (
                     <button type="button" disabled={logged}
-                      aria-label={`Paste ${clipboard.mode === 'copy' ? 'copy' : 'move'} to ${formatDate(date, { weekday: true })}`}
+                      aria-label={`Paste ${clipboard.mode === 'copy' ? 'copy' : 'move'} to ${shortDate}`}
                       title={logged ? 'Client results are protected' : 'Paste the selected workout on this day'}
                       onClick={() => attempt(clipboard.fromDate, date, clipboard.mode)}
                       className="w-full min-h-[36px] rounded-lg bg-[#111827] text-[#FFC809] text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
                       Paste here
                     </button>
                   )}
-                  <button type="button" aria-label={`Open ${formatDate(date, { weekday: true })} editor`}
+                  <button type="button" aria-label={`Open ${shortDate} editor`}
                     onClick={() => onSelectDate(date)}
                     className="w-full min-h-[32px] text-[11px] font-medium text-gray-600 underline cursor-pointer">
                     Edit day
