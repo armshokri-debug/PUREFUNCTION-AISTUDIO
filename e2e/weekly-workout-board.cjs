@@ -44,7 +44,7 @@ async function run(viewport) {
     const tuesday=board.getByRole('article',{name:/^Tue, .* workout$/});
     const thursday=board.getByRole('article',{name:/^Thu, .* workout$/});
     const friday=board.getByRole('article',{name:/^Fri, .* workout$/});
-    await tuesday.getByRole('button',{name:/Edit workout for Tue,/}).click();
+    await tuesday.getByRole('button',{name:/^Tue, /}).click();
     const create=page.getByRole('button',{name:'Create workout'});
     if (await create.isVisible()) await create.click();
 
