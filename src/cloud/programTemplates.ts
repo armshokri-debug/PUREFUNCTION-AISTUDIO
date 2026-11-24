@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ProgramTemplate } from '../lib/programTemplates';
 import { Profile, useSession } from './Session';
 import { supabase } from './supabase';
+import { isVersionConflictCode } from './versionConflict';
 
 const DEMO_KEY = 'pf.programTemplates.v1';
 export const DESIGNER_UNAVAILABLE_LABEL = 'Designer name unavailable';
@@ -135,7 +136,7 @@ function mapTemplateUpdateError(err: unknown): Error {
       ? rec.message
       : '';
 
-  if (code === '40001' || /modified elsewhere|version_conflict/i.test(message)) {
+  if (isVersionConflictCode(code) || /modified elsewhere|version_conflict/i.test(message)) {
     return new Error('This template was modified elsewhere. Reload templates before saving your changes.');
   }
   if (code === '42501' || /permission denied|access denied|verified coach/i.test(message)) {
