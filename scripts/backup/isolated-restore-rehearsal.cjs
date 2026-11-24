@@ -12,7 +12,9 @@ const {decryptFile,sha256File,safeStorageFilePath} = require('./backup-lib.cjs')
 const {createClient} = require('@supabase/supabase-js');
 
 const PROD_REF = 'rugwzvztweiffprkxfdc';
-const ARCHIVE_NAME = 'backup-2026-11-23T22-29-25Z.tar.gz.enc';
+const ARCHIVE_NAME = process.env.BACKUP_ARCHIVE_NAME || 'backup-2026-11-23T22-29-25Z.tar.gz.enc';
+assert(/^backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.tar\.gz\.enc$/.test(ARCHIVE_NAME),
+  'Blocked: backup archive name does not match safe naming format');
 const MAX_BYTES = 256 * 1024 * 1024;
 const SECRETS = ['BACKUP_GDRIVE_CLIENT_ID','BACKUP_GDRIVE_CLIENT_SECRET',
   'BACKUP_GDRIVE_REFRESH_TOKEN','BACKUP_ENCRYPTION_KEY'];
