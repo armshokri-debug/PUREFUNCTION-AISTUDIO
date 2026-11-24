@@ -158,6 +158,16 @@ export function defaultBlockFor(exercise: Exercise): WorkoutBlock {
 }
 
 
+/** A rest interval in a superset starts after its final exercise, not between
+ * back-to-back movements. Independent exercises keep their normal rest timer. */
+export function restAfterExercise(
+  blocks: Pick<WorkoutBlock, 'id' | 'supersetWithPrevious'>[],
+  blockId: string
+): boolean {
+  const index = blocks.findIndex((b) => b.id === blockId);
+  return index >= 0 && !blocks[index + 1]?.supersetWithPrevious;
+}
+
 /** A free-text exercise lives in the workout itself; it is not added to the
  * coach's shared exercise library. Deterministic names keep workout history
  * meaningful across sessions and copied workout dates. */
