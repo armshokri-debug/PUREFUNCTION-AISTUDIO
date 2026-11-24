@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/pf-real-schema-coach-client.yml'
       - 'scripts/migration/coach-client-isolation.mjs'
+      - 'supabase/proposals/postgrest_pt409_stale_conflicts.sql'
 
 permissions:
   contents: read
@@ -14,7 +15,8 @@ jobs:
     if: >-
       github.event.pull_request.head.repo.full_name == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
       (github.event.pull_request.head.ref == 'qa/coach-client-isolation-20261122' ||
-       github.event.pull_request.head.ref == 'qa/workout-logging-integration-20261124')
+       github.event.pull_request.head.ref == 'qa/workout-logging-integration-20261124' ||
+       github.event.pull_request.head.ref == 'safety/postgrest-stale-conflict-20261124')
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -126,6 +128,17 @@ jobs:
           psql "$local_db" -X -v ON_ERROR_STOP=1 -c \
             'CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION private.on_auth_user_created();' >/dev/null
           echo 'PASS: cross-schema auth.users profile trigger reattached in isolated Docker'
+
+      - name: Apply reviewed non-retryable conflict codes in disposable local DB
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_db="$(node -e "let s=require(process.env.RUNNER_TEMP+'/pf-local-status.json'); console.log(s.DB_URL||s.db_url||'')")"
+          node -e "const u=new URL(process.argv[1]); if(!['localhost','127.0.0.1'].includes(u.hostname))process.exit(1)" "$local_db"
+          psql "$local_db" -X -v ON_ERROR_STOP=1 -f supabase/proposals/postgrest_pt409_stale_conflicts.sql >/dev/null
+          psql "$local_db" -X -tA -c "select pg_get_functiondef('public.save_workout_results_secure(text,text,timestamp with time zone,jsonb)'::regprocedure) like '%PT409%'" | grep -qx t
+          psql "$local_db" -X -tA -c "select pg_get_functiondef('public.pf_update_program_template(text,jsonb,jsonb)'::regprocedure) like '%PT409%'" | grep -qx t
+          echo "PASS: local synthetic RPCs use non-retryable PT409 with security intact"
 
       - name: Check synthetic coach/client ownership, RLS and persistence
         shell: bash

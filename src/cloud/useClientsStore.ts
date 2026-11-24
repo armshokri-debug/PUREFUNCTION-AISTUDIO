@@ -7,6 +7,7 @@ import { usePersistentState } from '../lib/storage';
 import { stableStringify, supabase } from './supabase';
 import type { Profile } from './Session';
 import { workoutResults } from './workoutResults';
+import { isVersionConflictCode } from './versionConflict';
 
 export type SyncState = 'saved' | 'saving' | 'error' | 'offline';
 
@@ -293,7 +294,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
         } while (again.current && mounted.current && !blocked.current);
       } catch (e) {
         failed = true;
-        conflict = ['40001', '42501', '23505', '23503'].includes((e as { code?: string }).code ?? '');
+        conflict = (isVersionConflictCode((e as { code?: string }).code) || ['42501', '23505', '23503'].includes((e as { code?: string }).code ?? ''));
         if (conflict) blocked.current = true;
         if (conflict) setLoadError('Your changes could not be saved safely. Reload to fetch the latest data before editing again.');
       } finally {

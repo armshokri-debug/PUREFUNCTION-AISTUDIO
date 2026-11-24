@@ -82,6 +82,34 @@ try {
   assert.equal((await ok(outsider.user.from('profiles').select('role').eq('id',outsider.uid))).length,0);
   console.log('PASS: fake coach allowlist / Auth sessions / outsider without profile');
 
+  // Real program-template RPC: a deterministic stale edit must map to HTTP
+  // 409/PT409 rather than 40001, and must never weaken ownership.
+  const templateId='pf-template-'+t;
+  const templateData={id:templateId,name:'Synthetic template',scope:'week',createdAt:'2026-11-24T00:00:00Z',days:[]};
+  const updatedTemplate={...templateData,name:'Updated synthetic template'};
+  const staleTemplate={...templateData,name:'Outdated snapshot'};
+  await ok(coachA.user.from('program_templates').insert({
+    id:templateId,owner_id:coachA.uid,data:templateData
+  }).select('id'));
+  const templateConflict=await coachA.user.rpc('pf_update_program_template',{
+    p_id:templateId,p_data:updatedTemplate,p_expected_data:staleTemplate
+  });
+  assert(templateConflict.error?.code==='PT409',
+    'Stale template edit must fail as HTTP 409/PT409 without retry');
+  const untouchedTemplate=await ok(coachA.user.from('program_templates').select('data').eq('id',templateId).single());
+  assert.deepEqual(untouchedTemplate.data,templateData,'Stale template edit unexpectedly persisted');
+  const templateSaved=await ok(coachA.user.rpc('pf_update_program_template',{
+    p_id:templateId,p_data:updatedTemplate,p_expected_data:templateData
+  }));
+  assert.equal(templateSaved.data.name,'Updated synthetic template','Valid template edit not persisted');
+  const otherCoachEdit=await coachB.user.rpc('pf_update_program_template',{
+    p_id:templateId,p_data:templateData,p_expected_data:updatedTemplate
+  });
+  assert(otherCoachEdit.error?.code==='42501','Foreign template edit must remain forbidden');
+  await ok(coachA.user.from('program_templates').delete().eq('id',templateId).select('id'));
+  console.log('PASS: stale template rejected once with PT409; valid edit persists; other-coach access refused');
+
+
   await retry(() => ok(coachA.user.from('clients').insert({
     id:cid,email:emails.member,coach_id:coachA.uid,
     data:{name:'synthetic client'}
@@ -146,7 +174,7 @@ try {
     p_workout_id:workout,p_client_id:cid,
     p_expected_version:baseline.updated_at,p_results:results
   });
-  assert(stale.error && stale.error.code==='40001','Stale client version must fail with VERSION_CONFLICT');
+  assert(stale.error && stale.error.code==='PT409','Stale client version must fail as HTTP 409/PT409 without retry');
   const afterStale=await ok(member.user.from('workouts').select('data,updated_at').eq('id',workout).single());
   assert.equal(afterStale.updated_at,reloaded.updated_at,'Stale save mutated workout version');
   await ensureDenied(member.user.from('workouts').update({
