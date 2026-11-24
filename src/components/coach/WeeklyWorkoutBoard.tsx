@@ -113,7 +113,8 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                 className={`min-w-0 rounded-2xl border bg-white p-2.5 sm:p-3 flex flex-col ${hovered ? 'ring-2 ring-[#FFC809] border-[#FFC809]' : selected ? 'border-[#111827] shadow-sm' : 'border-gray-200'}`}
               >
                 <button type="button" onClick={() => onSelectDate(date)}
-                  aria-label={`Edit workout for ${formatDate(date, { weekday: true })}`}
+                  aria-label={formatDate(date, { weekday: true })}
+                  title="Select day to edit workout"
                   className="w-full flex items-center justify-between gap-1 rounded-lg px-1 py-1 text-left hover:bg-gray-50 cursor-pointer">
                   <span className="text-xs font-bold text-[#111827]">{dayShort(date)} {parseISODate(date).getDate()}</span>
                   {selected && <span className="text-[10px] font-bold text-[#B45309]">Editing</span>}
