@@ -29,6 +29,7 @@ import {
   orderLabels,
   parseISODate,
   parseReps,
+  restAfterExercise,
   startOfWeek,
   suggestLoad,
   todayISO,
