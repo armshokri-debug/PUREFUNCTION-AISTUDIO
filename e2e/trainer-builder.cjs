@@ -18,8 +18,15 @@ async function check(label, p) {
   console.log('PASS:', label);
 }
 async function openBuilder(page) {
+  const heading = page.getByRole('heading', { name: 'Workout Builder' });
+  if (await heading.isVisible()) return; // persisted client workspace after Refresh
   await page.locator('main').getByText('Alex Carter', { exact: true }).first().click();
-  await page.getByRole('heading', { name: 'Workout Builder' }).waitFor();
+  if (!(await heading.isVisible())) {
+    // At mobile widths the roster opens a client detail sheet first.
+    await page.locator('section[aria-label="Selected client details"]')
+      .getByRole('button', { name: 'Exercises', exact: true }).click();
+  }
+  await heading.waitFor();
 }
 async function run(viewport) {
   const ctx = await browser.newContext({viewport, serviceWorkers:'block'});
