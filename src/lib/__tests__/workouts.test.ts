@@ -9,6 +9,7 @@ import {
   lastPerformance,
   migrateClient,
   orderLabels,
+  restAfterExercise,
   parseReps,
   startOfWeek,
   suggestLoad,
