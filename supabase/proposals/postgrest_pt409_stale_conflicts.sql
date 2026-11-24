@@ -42,7 +42,7 @@ BEGIN
     SELECT pg_get_functiondef(fn), proowner, proacl, prosecdef, proconfig
       INTO ddl_before, original_owner, original_acl, original_security_definer, original_config
       FROM pg_proc WHERE oid=fn;
-    IF NOT original_security_definer OR NOT ('search_path=' || '') = ANY(original_config) THEN
+    IF NOT original_security_definer OR NOT ('search_path=""' = ANY(original_config)) THEN
       RAISE EXCEPTION 'BLOCKED: expected function security metadata drift: %', item.signature;
     END IF;
     seen := (length(ddl_before)-length(replace(ddl_before,item.old_fragment,'')))
