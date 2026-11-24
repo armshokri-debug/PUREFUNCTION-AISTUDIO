@@ -94,12 +94,69 @@ try {
   assert.equal((await fetchRows(outsider.user,'clients','id',cid)).length,0);
   console.log('PASS: client ownership / assigned client read / other coach and outsider isolated');
 
+  const blockId='pf-block-'+t;
+  const prescribedData={
+    name:'synthetic workout', title:'Coach-owned prescription',
+    status:'planned',
+    blocks:[{
+      id:blockId,name:'Synthetic strength block',prescribedReps:8,
+      loggedSets:[{setNumber:1,kg:null,reps:null,completed:false}]
+    }]
+  };
   await ok(coachA.user.from('workouts').insert({
     id:workout,client_id:cid,date:'2026-11-22',
-    data:{name:'synthetic workout',exercises:[]}
+    data:prescribedData
   }));
   assert.equal((await fetchRows(member.user,'workouts','id',workout)).length,1);
   assert.equal((await fetchRows(coachB.user,'workouts','id',workout)).length,0);
+
+  // Client logs results using the actual production RPC, then signs in from a
+  // second client session (fresh Supabase client) to verify durable DB state.
+  const baseline=await ok(member.user.from('workouts').select('id,data,updated_at').eq('id',workout).single());
+  const results={
+    status:'completed',completedAt:'2026-11-24T09:00:00.000Z',
+    sessionRpe:7,clientFeedback:'Synthetic session finished',
+    blocks:[{
+      id:blockId,loggedSets:[{setNumber:1,kg:40,reps:8,completed:true}],
+      rpe:7,pain:false,clientNote:'Synthetic result'
+    }]
+  };
+  const response=await ok(member.user.rpc('save_workout_results_secure',{
+    p_workout_id:workout,p_client_id:cid,
+    p_expected_version:baseline.updated_at,p_results:results
+  }));
+  assert.equal(response.length,1,'Secure result RPC must return one version');
+  assert(response[0]?.updated_version&&response[0].updated_version!==baseline.updated_at,
+    'Result save must advance the workout version');
+  const secondDevice=client(anon);
+  await ok(secondDevice.auth.signInWithPassword({email:emails.member,password}));
+  const reloaded=await ok(secondDevice.from('workouts').select('data,updated_at').eq('id',workout).single());
+  assert.equal(reloaded.updated_at,response[0].updated_version,'Fresh-session read differs from saved version');
+  assert.equal(reloaded.data.status,'completed','Completed status was not persisted');
+  assert.equal(reloaded.data.sessionRpe,7,'Session RPE was not persisted');
+  assert.equal(reloaded.data.blocks[0].loggedSets[0].reps,8,'Logged reps were not persisted');
+  assert.equal(reloaded.data.blocks[0].loggedSets[0].kg,40,'Logged load was not persisted');
+  assert.equal(reloaded.data.title,prescribedData.title,'Client changed coach-owned title');
+  assert.equal(reloaded.data.blocks[0].prescribedReps,8,'Client changed prescription');
+  const coachView=await ok(coachA.user.from('workouts').select('data').eq('id',workout).single());
+  assert.equal(coachView.data.status,'completed','Coach could not see saved client result');
+  console.log('PASS: client secure workout result saved; fresh login sees persisted result and coach sees completion');
+
+  const stale=await member.user.rpc('save_workout_results_secure',{
+    p_workout_id:workout,p_client_id:cid,
+    p_expected_version:baseline.updated_at,p_results:results
+  });
+  assert(stale.error && stale.error.code==='40001','Stale client version must fail with VERSION_CONFLICT');
+  const afterStale=await ok(member.user.from('workouts').select('data,updated_at').eq('id',workout).single());
+  assert.equal(afterStale.updated_at,reloaded.updated_at,'Stale save mutated workout version');
+  await ensureDenied(member.user.from('workouts').update({
+    data:{...reloaded.data,title:'Unauthorized prescription'}
+  }).eq('id',workout).select('id'),'client directly rewriting coach prescription');
+  const foreign=await coachB.user.rpc('save_workout_results_secure',{
+    p_workout_id:workout,p_client_id:cid,p_expected_version:reloaded.updated_at,p_results:results
+  });
+  assert(foreign.error && foreign.error.code==='42501','Another coach cannot log this client result');
+  console.log('PASS: version conflicts fail closed; direct client prescription edits and foreign result writes denied');
   await ensureDenied(coachB.user.from('workouts').insert({
     id:'foreign-workout-'+t,client_id:cid,date:'2026-11-23',data:{name:'unauthorized'}
   }).select('id'), 'other coach inserting a workout');
