@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   MoreHorizontal,
   Send,
@@ -6,6 +6,7 @@ import {
   RotateCcw,
   Trash2
 } from 'lucide-react';
+import { ViewportActionMenu } from './ViewportActionMenu';
 
 interface ClientActionMenuProps {
   clientName: string;
@@ -35,25 +36,7 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
 
   const run = (fn?: () => void) => {
     setOpen(false);
@@ -74,10 +57,9 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
       </button>
 
       {open && (
-        <div
-          role="menu"
-          aria-label={`Actions for ${clientName}`}
-          className="absolute right-0 mt-1.5 w-52 max-w-[calc(100vw-2rem)] rounded-xl bg-white border border-gray-200 shadow-[0_10px_30px_rgba(17,24,39,0.1)] py-1.5 z-30"
+        <ViewportActionMenu anchorRef={containerRef} onClose={close} width={208}
+          label={`Actions for ${clientName}`}
+          className="rounded-xl bg-white border border-gray-200 shadow-[0_10px_30px_rgba(17,24,39,0.1)] py-1.5"
         >
           {showInvite && onInvite && (
             <button
@@ -143,7 +125,7 @@ export const ClientActionMenu: React.FC<ClientActionMenuProps> = ({
               </span>
             </button>
           )}
-        </div>
+        </ViewportActionMenu>
       )}
     </div>
   );

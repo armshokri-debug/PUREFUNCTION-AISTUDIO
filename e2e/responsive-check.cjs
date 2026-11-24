@@ -51,6 +51,29 @@ async function measure(p) {
     const p = await ctx.newPage();
     const errs = []; p.on('pageerror', (e) => errs.push(e.message));
     await p.goto(`http://localhost:${PORT}/`); await p.waitForTimeout(1500);
+    // Menus must be checked while open: page scrollWidth alone misses left-edge clipping.
+    const checkMenus = async (name) => {
+      const triggers = p.locator('button[aria-haspopup="menu"]:visible');
+      for (let i = 0; i < await triggers.count(); i++) {
+        const trigger = triggers.nth(i);
+        const title = await trigger.getAttribute('aria-label');
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.click({ timeout: 3000 });
+        const menu = p.getByRole('menu');
+        await menu.waitFor({ state: 'visible' });
+        const bounds = await menu.evaluate(el => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+            width: document.documentElement.clientWidth, height: window.innerHeight };
+        });
+        const bad = bounds.left < -1 || bounds.right > bounds.width + 1 ||
+          bounds.top < -1 || bounds.bottom > bounds.height + 1 || bounds.bottom <= bounds.top;
+        if (bad) failures++;
+        console.log(`${bad ? 'XX' : 'ok'} [${vn}] ${name} open menu: ${title} ${JSON.stringify(bounds)}`);
+        await p.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+      }
+    };
     const report = async (name) => {
       await p.waitForTimeout(400);
       const m = await measure(p);
@@ -59,6 +82,7 @@ async function measure(p) {
       console.log(`${bad ? 'XX' : 'ok'} [${vn}] ${name}${m.page > 0 ? ` PAGE+${m.page}px` : ''}`);
       m.scrollers.forEach((s) => console.log('     scroll: ' + s));
       m.offRight.forEach((s) => console.log('     off:    ' + s));
+      if (['client', 'tab-Exercises', 'tab-Exercises-Program', 'nav-Programs'].includes(name)) await checkMenus(name);
       if (shots) await p.screenshot({ path: `${shots}/${vn}-${name.replace(/[^\w]+/g, '_')}.png`, fullPage: true });
     };
     const click = async (loc) => { try { await loc.first().click({ timeout: 2500 }); return true; } catch { return false; } };
