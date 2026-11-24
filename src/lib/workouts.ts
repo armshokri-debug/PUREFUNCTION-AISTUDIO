@@ -299,7 +299,7 @@ export function copyWorkouts(client: ClientProfile, pairs: { from: Workout; toDa
 export type WorkoutTransferMode = 'move' | 'copy';
 export type WorkoutTransferStatus =
   | 'done' | 'same-day' | 'missing-source' | 'source-protected'
-  | 'destination-protected' | 'destination-occupied';
+  | 'destination-protected' | 'destination-occupied' | 'blocked-sync';
 
 export interface WorkoutTransferResult {
   client: ClientProfile;
