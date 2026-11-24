@@ -35,6 +35,10 @@ async function run(viewport) {
   try {
     await page.goto(`http://localhost:${PORT}/`);
     await openBuilder(page);
+    // Synthetic demo ships with weekday workouts; test two weeks ahead to
+    // avoid replacing seeded plans while verifying empty-day move/copy.
+    await page.getByRole('button',{name:'Next week'}).click();
+    await page.getByRole('button',{name:'Next week'}).click();
     const board = page.getByRole('region',{name:'Weekly workout overview'});
     await requireTrue('complete seven-day board appears',board.getByRole('article').count().then(n=>n===7));
     const tuesday=board.getByRole('article',{name:/^Tue, .* workout$/});
