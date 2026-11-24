@@ -1,0 +1,114 @@
+name: Isolated Production Backup Restore Rehearsal
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/backup/isolated-restore-rehearsal.cjs'
+      - '.github/workflows/isolated-backup-restore.yml'
+  workflow_dispatch:
+    inputs:
+      archive_name:
+        description: Exact backup filename from a successful encrypted-backup job
+        required: true
+        type: string
+      reviewed_sha:
+        description: Current reviewed main commit SHA (40 hex characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    if: >-
+      github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.head_ref == 'safety/backup-restore-acceptance-20261124') ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.event.inputs.reviewed_sha == github.sha)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PF_ISOLATED_RESTORE: I_CONFIRM_DISPOSABLE_LOCAL_ONLY
+      BACKUP_ARCHIVE_NAME: ${{ inputs.archive_name || 'backup-2026-11-23T22-29-25Z.tar.gz.enc' }}
+      BACKUP_GDRIVE_CLIENT_ID: ${{ secrets.BACKUP_GDRIVE_CLIENT_ID }}
+      BACKUP_GDRIVE_CLIENT_SECRET: ${{ secrets.BACKUP_GDRIVE_CLIENT_SECRET }}
+      BACKUP_GDRIVE_REFRESH_TOKEN: ${{ secrets.BACKUP_GDRIVE_REFRESH_TOKEN }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_GDRIVE_FOLDER_ID: ${{ vars.BACKUP_GDRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - name: Validate syntax and ensure secrets are configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/backup/isolated-restore-rehearsal.cjs
+          for key in BACKUP_GDRIVE_CLIENT_ID BACKUP_GDRIVE_CLIENT_SECRET BACKUP_GDRIVE_REFRESH_TOKEN BACKUP_ENCRYPTION_KEY BACKUP_GDRIVE_FOLDER_ID; do
+            test -n "${!key}" || { echo "BLOCKED: missing required configuration: $key"; exit 1; }
+          done
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+      - name: Install PostgreSQL 17 client tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      - name: Start isolated local Supabase (no Production credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PF_ISOLATED_DIR="$RUNNER_TEMP/pf-restore-local"
+          echo "PF_ISOLATED_DIR=$PF_ISOLATED_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$PF_ISOLATED_DIR"
+          cd "$PF_ISOLATED_DIR"
+          supabase init
+          supabase start > "$RUNNER_TEMP/pf-local-start.log" 2>&1
+          supabase status -o json > status.json
+          node - <<'JS'
+          const fs=require('node:fs'),s=JSON.parse(fs.readFileSync('status.json','utf8'));
+          const v=(...k)=>k.map(x=>s[x]).find(x=>typeof x==='string'&&x.length);
+          const db=v('DB_URL','db_url'),api=v('API_URL','api_url');
+          const key=v('SERVICE_ROLE_KEY','service_role_key','SECRET_KEY','secret_key');
+          for(const url of [db,api]) {
+            if (!url || !['localhost','127.0.0.1'].includes(new URL(url).hostname))
+              throw Error('BLOCKED: Supabase is not local');
+          }
+          if(!key) throw Error('Missing disposable local Storage key');
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            'PF_RESTORE_DB_URL='+db+'\nPF_RESTORE_API_URL='+api+'\nPF_RESTORE_LOCAL_SERVICE_KEY='+key+'\n');
+          console.log('PASS: all restore endpoints pinned to disposable local Supabase');
+          JS
+      - name: Restore real encrypted backup into disposable local Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/backup/isolated-restore-rehearsal.cjs
+      - name: Delete isolated local database, Auth and Storage
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${PF_ISOLATED_DIR:-}" && -d "$PF_ISOLATED_DIR" ]]; then
+            ( cd "$PF_ISOLATED_DIR" && supabase stop --no-backup ) > /dev/null 2>&1 || true
+            rm -rf "$PF_ISOLATED_DIR"
+          fi
+          echo "Disposable restoration environment destroyed"
