@@ -61,8 +61,8 @@ async function run(viewport) {
     await requireTrue('superset A1/A2 visible without opening each day',
       tuesday.getByText(/A2/).count().then(n=>n>0));
 
-    await tuesday.getByRole('button',{name:/Copy Tue,/}).click();
-    await friday.getByRole('button',{name:/Paste copy to Fri,/}).click();
+    await tuesday.getByRole('button',{name:/Copy Tue /}).click();
+    await friday.getByRole('button',{name:/Paste copy to Fri /}).click();
     await requireTrue('copy keeps Tuesday original', tuesday.getByText('Stability Ball Body Saw').isVisible());
     await requireTrue('copy preserves all Friday exercise prescriptions',
       friday.getByText('Stability Ball Body Saw').isVisible());
@@ -70,14 +70,14 @@ async function run(viewport) {
     if (viewport.width >= 800) {
       await friday.dragTo(thursday);
     } else {
-      await friday.getByRole('button',{name:/Move Fri,/}).click();
-      await thursday.getByRole('button',{name:/Paste move to Thu,/}).click();
+      await friday.getByRole('button',{name:/Move Fri /}).click();
+      await thursday.getByRole('button',{name:/Paste move to Thu /}).click();
     }
     await requireTrue('move places all exercises on Thursday',
       thursday.getByText('Stability Ball Body Saw').isVisible());
     await requireTrue('move clears Friday only', friday.getByText('No workout planned').isVisible());
 
-    await tuesday.getByRole('button',{name:/Move Tue,/}).click();
+    await tuesday.getByRole('button',{name:/Move Tue /}).click();
     await thursday.getByRole('button',{name:/Paste move to Thu,/}).click();
     const confirm=page.getByRole('dialog',{name:'Replace existing planned workout'});
     await confirm.waitFor();
