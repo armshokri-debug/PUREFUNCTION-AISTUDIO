@@ -5,6 +5,16 @@ on:
     paths:
       - 'scripts/backup/isolated-restore-rehearsal.cjs'
       - '.github/workflows/isolated-backup-restore.yml'
+  workflow_dispatch:
+    inputs:
+      archive_name:
+        description: Exact backup filename from a successful encrypted-backup job
+        required: true
+        type: string
+      reviewed_sha:
+        description: Current reviewed main commit SHA (40 hex characters)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,12 +23,17 @@ jobs:
   restore:
     if: >-
       github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.head_ref == 'safety/backup-restore-acceptance-20261124'
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.head_ref == 'safety/backup-restore-acceptance-20261124') ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.event.inputs.reviewed_sha == github.sha)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       PF_ISOLATED_RESTORE: I_CONFIRM_DISPOSABLE_LOCAL_ONLY
+      BACKUP_ARCHIVE_NAME: ${{ inputs.archive_name || 'backup-2026-11-23T22-29-25Z.tar.gz.enc' }}
       BACKUP_GDRIVE_CLIENT_ID: ${{ secrets.BACKUP_GDRIVE_CLIENT_ID }}
       BACKUP_GDRIVE_CLIENT_SECRET: ${{ secrets.BACKUP_GDRIVE_CLIENT_SECRET }}
       BACKUP_GDRIVE_REFRESH_TOKEN: ${{ secrets.BACKUP_GDRIVE_REFRESH_TOKEN }}
