@@ -292,7 +292,7 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, saveAsCopy = fa
           <section className="space-y-4">
             <div>
               <label className={labelCls}>Exercise name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Left AIC Split Squat" className={inputCls} />
+              <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Exercise name" placeholder="Exercise name" className={inputCls} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -333,11 +333,11 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, saveAsCopy = fa
 
             <div>
               <label className={labelCls}>Coaching cues (one per line)</label>
-              <textarea value={cuesText} onChange={(e) => setCuesText(e.target.value)} rows={4} placeholder={'Ribs down over pelvis\nFeel the left heel'} className={inputCls} />
+              <textarea value={cuesText} onChange={(e) => setCuesText(e.target.value)} rows={4} placeholder="Coaching cues" className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Breathing (optional)</label>
-              <input value={breathing} onChange={(e) => setBreathing(e.target.value)} placeholder="e.g. Inhale nose 4s · exhale 6s" className={inputCls} />
+              <input value={breathing} onChange={(e) => setBreathing(e.target.value)} placeholder="Breathing pattern" className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Why it matters (optional)</label>

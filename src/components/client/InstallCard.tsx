@@ -63,7 +63,6 @@ export const InstallCard: React.FC = () => {
         <X className="w-4 h-4" />
       </button>
       <div className="text-sm font-bold text-[#111827] mb-1">Put Pure Function on your home screen</div>
-      <p className="text-xs text-gray-600 mb-3">Opens in one tap, full screen, like an app.</p>
 
       {platform === 'ios-safari' && (
         <ol className="space-y-2 text-sm text-[#111827]">

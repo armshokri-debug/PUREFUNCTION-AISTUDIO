@@ -79,7 +79,6 @@ export const ReferView: React.FC<{ firstName?: string }> = ({ firstName }) => {
   return (
     <div className="max-w-lg mx-auto space-y-4 pb-8">
       <div>
-        <span className="text-xs font-semibold text-gray-500">Invite friends from anywhere</span>
         <h1 className="text-2xl font-bold tracking-tight text-[#111827] mt-0.5">Refer</h1>
       </div>
 
@@ -129,8 +128,8 @@ export const ReferView: React.FC<{ firstName?: string }> = ({ firstName }) => {
           </>
         )}
         <p className="text-xs text-gray-500 mt-3">
-          When someone you invite becomes a paying member, you earn{' '}
-          {creditPer ? <b>{formatMoney(creditPer)}</b> : 'credit'} to use toward your own purchases.
+          Earn{' '}
+          {creditPer ? <b>{formatMoney(creditPer)}</b> : 'credit'} toward purchases per paying referral.
         </p>
       </div>
 
@@ -161,7 +160,7 @@ export const ReferView: React.FC<{ firstName?: string }> = ({ firstName }) => {
           <h2 className="text-sm font-bold text-[#111827]">Your referrals</h2>
         </div>
         {!loading && referrals.length === 0 && (
-          <p className="text-sm text-gray-500 mt-3">No one yet. Share your link and their status shows up here.</p>
+          <p className="text-sm text-gray-500 mt-3">No referrals yet.</p>
         )}
         <ul className="mt-2 divide-y divide-gray-100">
           {referrals.map((r) => (

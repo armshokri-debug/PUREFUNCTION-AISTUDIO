@@ -95,7 +95,7 @@ export const MeasureSheet: React.FC<{
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
-          placeholder="What you saw, how it felt, compensations…"
+          placeholder="Assessment notes"
           className={`${field} mb-5`}
         />
 
@@ -125,7 +125,7 @@ export const MeasureSheet: React.FC<{
             className={field}
           />
           <p className="text-[11px] text-gray-500 mt-2">
-            Progress updates automatically with each new assessment. Leave the target empty to remove the goal.
+            Progress updates automatically. Clear target to remove goal.
           </p>
         </div>
 

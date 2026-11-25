@@ -80,9 +80,9 @@ const today = iso(new Date());
   // Regression: starting phase guidance follows the coach's chosen phase.
   const startingPhase = C.locator('select').filter({ has: C.locator('option[value="1-Reposition"]') });
   await startingPhase.selectOption('2-Integrate');
-  ok(await C.getByText(/Integrate: use coordinated, functional movement/).isVisible(), 'phase 2 shows Integrate guidance during onboarding');
+  ok(await C.getByText(/Coordinated functional movement/).isVisible(), 'phase 2 shows Integrate guidance during onboarding');
   await startingPhase.selectOption('1-Reposition');
-  ok(await C.getByText(/Reposition: start with breathing, positioning/).isVisible(), 'phase 1 shows Reposition guidance during onboarding');
+  ok(await C.getByText(/Breathing, positioning and movement control/).isVisible(), 'phase 1 shows Reposition guidance during onboarding');
   await C.getByPlaceholder('e.g., Jordan Taylor').fill('Ryan Lee');
   await C.getByPlaceholder('jordan.taylor@example.com').fill('ryan.typo@example.com');
   await C.locator('form button[type=submit]').click();
@@ -178,7 +178,7 @@ const today = iso(new Date());
 
   // Private notes use the secure table and never enter clients.data.
   await C.getByRole('button', { name: 'Notes', exact: true }).click();
-  await C.getByPlaceholder(/Left knee tight/).fill('Private recovery note');
+  await C.getByRole('textbox', { name: 'Coach note', exact: true }).fill('Private recovery note');
   await C.getByRole('button', { name: 'Save note', exact: true }).click();
   await C.getByText('Private recovery note', { exact: true }).waitFor();
   ok(mock.db.coach_notes_secure.length === 1, 'coach note persists in secure table');
@@ -239,7 +239,7 @@ const today = iso(new Date());
   await R.getByRole('button', { name: '8', exact: true }).first().click();
   await R.getByRole('button', { name: 'Finish workout' }).click();
   await R.getByRole('button', { name: '7', exact: true }).last().click();
-  await R.getByPlaceholder(/How did it feel/).fill('Felt strong');
+  await R.getByRole('textbox', { name: 'Session feedback', exact: true }).fill('Felt strong');
   await R.getByRole('button', { name: /^Finish workout \(/ }).click();
   await R.waitForTimeout(1500);
   const wAfter = mock.db.workouts.find((x) => x.client_id === ryanRow.id && x.date === today);
@@ -287,7 +287,7 @@ const today = iso(new Date());
   await C.getByRole('button', { name: 'New exercise' }).click();
   await C.locator('input[type=file][accept^="video"]').setInputFiles(path.join(__dirname, 'fixtures', 'demo.webm'));
   await C.getByText(/checked, plays fine/).waitFor({ timeout: 15000 });
-  await C.getByPlaceholder('e.g. Left AIC Split Squat').fill('Ryan Wall Drill');
+  await C.getByRole('textbox', { name: 'Exercise name', exact: true }).fill('Ryan Wall Drill');
   await C.getByRole('button', { name: 'Save' }).click();
   await C.waitForTimeout(2000);
   const files = Object.keys(mock.db.files);
@@ -340,7 +340,7 @@ const today = iso(new Date());
 
   // Failed library writes keep the editor open and preserve existing media.
   await C.getByRole('button', { name: 'New exercise' }).click();
-  await C.getByPlaceholder('e.g. Left AIC Split Squat').fill('Unconfirmed exercise');
+  await C.getByRole('textbox', { name: 'Exercise name', exact: true }).fill('Unconfirmed exercise');
   mock.db.failNextExerciseWrite = true;
   await C.getByRole('button', { name: 'Save', exact: true }).click();
   await C.getByText(/Exercise was not saved/).waitFor();

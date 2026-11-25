@@ -380,8 +380,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       {clients.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200/80 py-14 px-6 text-center">
           <p className="text-sm text-gray-600 max-w-md mx-auto mb-5 leading-relaxed">
-            No clients yet. Tap “Add client” and enter their email — they’ll use it to create their
-            account.
+            No clients yet.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
@@ -555,8 +554,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 <div className="py-16 px-6 text-center">
                   <p className="text-sm text-gray-500 max-w-sm mx-auto leading-relaxed">
                     {listFilter === 'archived' && archivedClients.length === 0
-                      ? 'No archived clients yet. Archived clients leave your active roster while keeping all their records intact.'
-                      : 'Select a client from the list to view details and open their workspace.'}
+                      ? 'No archived clients.'
+                      : 'Select a client.'}
                   </p>
                 </div>
               ) : (
@@ -905,19 +904,17 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 </select>
                 <p className="mt-2 text-xs leading-relaxed text-gray-500">
                   {newPhase === '1-Reposition'
-                    ? 'Reposition: start with breathing, positioning and basic movement control when the assessment indicates those foundations need work.'
+                    ? 'Breathing, positioning and movement control.'
                     : newPhase === '2-Integrate'
-                      ? 'Integrate: use coordinated, functional movement when the client already demonstrates adequate foundational control.'
+                      ? 'Coordinated functional movement.'
                       : newPhase === '3-Strength'
-                        ? 'Strength: build progressively loaded strength on a stable movement foundation.'
-                        : 'Performance: refine sport- or goal-specific performance once the client is ready.'}{' '}
-                  Select the starting phase using the client’s assessment, training history, goals
-                  and your coaching judgment.
+                        ? 'Progressive strength training.'
+                        : 'Sport- or goal-specific performance.'}
                 </p>
               </div>
 
               <p className="text-xs text-gray-500 -mt-1">
-                Your client creates their account with this email to see their program.
+                Used for client sign-in.
               </p>
               {formError && (
                 <p

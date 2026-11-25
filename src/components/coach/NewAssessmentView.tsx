@@ -748,7 +748,7 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
                     aria-label={`${test.name} Assessment notes`}
                     rows={2}
                     value={test.notes ?? ''}
-                    placeholder="Notes observed during this test..."
+                    placeholder="Test notes"
                     onChange={(e) => updatePriItem(test.id, 'notes', e.target.value)}
                     className="w-full min-w-0 min-h-[44px] border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-xs font-medium text-[#111827] leading-relaxed focus:outline-none focus:border-[#111827] resize-y [overflow-wrap:anywhere]"
                   />
@@ -850,7 +850,7 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
                 type="text"
                 value={newMovementName}
                 onChange={(e) => setNewMovementName(e.target.value)}
-                placeholder="Add joint movement (e.g., Straight leg raise)..."
+                placeholder="Joint movement"
                 className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-[#111827] focus:outline-none focus:border-[#111827] w-64"
               />
               <button
@@ -901,7 +901,7 @@ export const NewAssessmentView: React.FC<NewAssessmentViewProps> = ({
                   <input
                     type="text"
                     value={item.finding}
-                    placeholder="What you see (e.g. right iliac crest 1 cm higher)"
+                    placeholder="Observation"
                     onChange={(e) => updateGaitItem(item.id, 'finding', e.target.value)}
                     className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs text-[#111827] focus:outline-none focus:border-[#111827]"
                   />

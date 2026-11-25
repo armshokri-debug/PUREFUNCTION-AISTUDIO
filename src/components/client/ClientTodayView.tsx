@@ -229,7 +229,6 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
       {!workout ? (
         <div className={`${card} text-center py-10`}>
           <p className="text-base font-semibold text-[#111827] mb-1">No workout scheduled</p>
-          <p className="text-sm text-gray-500">Recover well — walk, breathe, sleep.</p>
           {nextWorkout && (
             <button
               onClick={() => {
@@ -469,7 +468,7 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
                         <textarea
                           value={block.clientNote ?? ''}
                           onChange={(e) => patchBlock(block.id, { clientNote: e.target.value })}
-                          placeholder={block.pain ? 'Where and when did it hurt?' : 'Anything your coach should know'}
+                          placeholder={block.pain ? 'Where and when did it hurt?' : 'Coach note'}
                           rows={2}
                           className="mt-2 w-full text-base bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-[#111827]"
                         />
@@ -547,7 +546,8 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="How did it feel? Anything for your coach?"
+              aria-label="Session feedback"
+              placeholder="Session feedback"
               rows={3}
               className="w-full text-base bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-[#111827] mb-4"
             />
