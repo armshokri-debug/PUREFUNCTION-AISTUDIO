@@ -390,6 +390,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
         client={client}
         days={days}
         selectedDate={selectedDate}
+        today={today}
         onSelectDate={(d) => {
           selectDate(d);
           setConfirmDelete(false);
