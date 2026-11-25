@@ -9,6 +9,7 @@ import {
   lastPerformance,
   migrateClient,
   orderLabels,
+  workoutExerciseGroups,
   restAfterExercise,
   parseReps,
   startOfWeek,
@@ -65,6 +66,17 @@ describe('prescriptions', () => {
     expect(parseReps('10–8')).toEqual({ kind: 'reps', min: 8, max: 10 });
     expect(parseReps('30s').kind).toBe('time');
     expect(parseReps('AMRAP').kind).toBe('amrap');
+  });
+
+  it('uses the same membership for every exercise in a three-movement superset', () => {
+    const blocks = [{}, { supersetWithPrevious: true }, { supersetWithPrevious: true }, {}];
+    const groups = workoutExerciseGroups(blocks);
+    expect(groups.map(g => [g.label, g.inSuperset, g.startsSuperset, g.groupSize])).toEqual([
+      ['A1', true, true, 3], ['A2', true, false, 3], ['A3', true, false, 3], ['B', false, false, 1]
+    ]);
+    expect(workoutExerciseGroups([{}, {supersetWithPrevious: false}, {supersetWithPrevious: true}])
+      .map(g => [g.label, g.inSuperset])).toEqual([['A', false], ['B1', true], ['B2', true]]);
+    expect(workoutExerciseGroups([{supersetWithPrevious: true}])[0].inSuperset).toBe(false);
   });
 
   it('labels supersets A1/A2', () => {

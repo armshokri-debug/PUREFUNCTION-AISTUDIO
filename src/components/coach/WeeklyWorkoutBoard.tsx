@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, Grip, MoveRight, X } from 'lucide-react';
 import type { ClientProfile } from '../../types';
 import {
-  dayShort, effectiveStatus, formatDate, hasResults, orderLabels, parseISODate,
+  dayShort, effectiveStatus, formatDate, hasResults, workoutExerciseGroups, parseISODate,
   type WorkoutTransferMode, type WorkoutTransferStatus, workoutOn
 } from '../../lib/workouts';
 import { formatWeight } from '../../lib/units';
@@ -77,7 +77,7 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
         <div className="grid grid-cols-7 gap-2 min-w-[1120px] xl:min-w-0 items-stretch">
           {days.map((date) => {
             const workout = workoutOn(client, date);
-            const labels = workout ? orderLabels(workout.blocks) : [];
+            const groups = workout ? workoutExerciseGroups(workout.blocks) : [];
             const status = workout ? effectiveStatus(workout) : null;
             const logged = Boolean(workout && hasResults(workout));
             const movingBlocked = Boolean(workout && (logged || workout.status !== 'planned'));
@@ -129,10 +129,17 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                     <div className="text-xs font-bold text-[#111827] leading-snug break-words mb-1">{workout.title || 'Workout'}</div>
                     {workout.focus && <div className="text-[11px] text-gray-500 mb-2 break-words">{workout.focus}</div>}
                     <div className="space-y-1.5 flex-1">
-                      {workout.blocks.map((block, i) => (
-                        <div key={block.id} className={`rounded-lg bg-[#F7F8FA] px-2 py-2 min-w-0 ${block.supersetWithPrevious ? 'border-l-2 border-[#FFC809]' : ''}`}>
+                      {workout.blocks.map((block, i) => {
+                        const group = groups[i];
+                        return (
+                        <div key={block.id} data-weekly-exercise={group.label}
+                          data-superset-member={group.inSuperset ? group.groupLabel : undefined}
+                          className={`rounded-lg bg-[#F7F8FA] px-2 py-2 min-w-0 ${group.inSuperset ? 'border-l-2 border-[#FFC809]' : ''}`}>
+                          {group.startsSuperset && <div className="mb-1 rounded bg-[#FFF4CF] px-1.5 py-1 text-[10px] font-semibold text-[#92400E]">
+                            Superset {group.groupLabel} · {group.groupSize} exercises
+                          </div>}
                           <div className="text-[11px] font-semibold text-[#111827] leading-snug break-words">
-                            <span className="text-[#B45309]">{labels[i]}</span> {block.name}
+                            <span className="text-[#B45309]">{group.label}</span> {block.name}
                           </div>
                           <div className="text-[11px] text-gray-600 mt-0.5">
                             {block.sets} sets × {block.reps || '–'} reps
@@ -141,7 +148,8 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                           {block.restSec > 0 && <div className="text-[10px] text-gray-500">Rest {block.restSec}s</div>}
                           {block.notes && <p className="text-[10px] text-gray-500 mt-0.5 break-words">{block.notes}</p>}
                         </div>
-                      ))}
+                        );
+                      })}
                       {workout.blocks.length === 0 && <p className="text-xs text-gray-400">No exercises yet</p>}
                     </div>
                   </>

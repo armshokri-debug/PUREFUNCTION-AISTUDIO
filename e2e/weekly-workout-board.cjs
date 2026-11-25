@@ -54,6 +54,28 @@ async function run(viewport) {
     await search.fill('1 arm row with rotation');
     await page.getByRole('button',{name:'Add 1 arm row with rotation',exact:true}).click();
     await page.getByRole('button',{name:'Superset with previous'}).last().click();
+    await search.fill('Synthetic QA third movement');
+    await page.getByRole('button',{name:'Add custom exercise Synthetic QA third movement'}).click();
+    await page.getByRole('button',{name:'Superset with previous'}).last().click();
+    const assertGroup = async (day, labels, count) => {
+      const weeklyLabels = await day.locator('[data-weekly-exercise][data-superset-member]').evaluateAll(nodes =>
+        nodes.map(n => n.getAttribute('data-weekly-exercise')));
+      if (JSON.stringify(weeklyLabels) !== JSON.stringify(labels))
+        throw new Error('Weekly superset mismatch: '+JSON.stringify(weeklyLabels));
+      await requireTrue('weekly group member count matches', day.getByText(new RegExp('Superset A · '+count+' exercises')).isVisible());
+    };
+    const editorLabels = () => page.locator('[data-editor-exercise][data-superset-member]').evaluateAll(nodes =>
+      nodes.map(n=>n.getAttribute('data-editor-exercise')));
+    await assertGroup(tuesday, ['A1','A2','A3'],3);
+    await requireTrue('editor and weekly board show the same three highlighted members',
+      editorLabels().then(labels=>JSON.stringify(labels)===JSON.stringify(['A1','A2','A3'])));
+    await page.getByRole('button',{name:'Superset with previous'}).last().click();
+    await assertGroup(tuesday, ['A1','A2'],2);
+    await requireTrue('unpair updates both views immediately',
+      editorLabels().then(labels=>JSON.stringify(labels)===JSON.stringify(['A1','A2'])));
+    await page.getByRole('button',{name:'Superset with previous'}).last().click();
+    await assertGroup(tuesday, ['A1','A2','A3'],3);
+
     await requireTrue('Tuesday lists both exercises side-by-side with sets and reps',
       tuesday.getByText('Stability Ball Body Saw').count().then(n=>n>0));
     await requireTrue('grouped exercise prescriptions displayed',
@@ -66,6 +88,7 @@ async function run(viewport) {
     await requireTrue('copy keeps Tuesday original', tuesday.getByText('Stability Ball Body Saw').isVisible());
     await requireTrue('copy preserves all Friday exercise prescriptions',
       friday.getByText('Stability Ball Body Saw').isVisible());
+    await assertGroup(friday, ['A1','A2','A3'],3);
 
     if (viewport.width >= 800) {
       await friday.dragTo(thursday);
@@ -75,6 +98,7 @@ async function run(viewport) {
     }
     await requireTrue('move places all exercises on Thursday',
       thursday.getByText('Stability Ball Body Saw').isVisible());
+    await assertGroup(thursday, ['A1','A2','A3'],3);
     await requireTrue('move clears Friday only', friday.getByText('No workout planned').isVisible());
 
     await tuesday.getByRole('button',{name:/Move Tue /}).click();
@@ -94,6 +118,8 @@ async function run(viewport) {
       after.getByRole('article',{name:/^Thu, .* workout$/}).getByText('Stability Ball Body Saw').isVisible());
     await requireTrue('Tuesday original remains after Refresh',
       after.getByRole('article',{name:/^Tue, .* workout$/}).getByText('Stability Ball Body Saw').isVisible());
+    await assertGroup(after.getByRole('article',{name:/^Tue, .* workout$/}), ['A1','A2','A3'],3);
+    await assertGroup(after.getByRole('article',{name:/^Thu, .* workout$/}), ['A1','A2','A3'],3);
     await requireTrue('rest day remains unplanned after Refresh',
       after.getByRole('article',{name:/^Fri, .* workout$/}).getByText('No workout planned').isVisible());
     await requireTrue('all days accessible',after.getByRole('article').count().then(n=>n===7));

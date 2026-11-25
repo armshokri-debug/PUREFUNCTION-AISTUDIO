@@ -38,7 +38,7 @@ import {
   formatPerformance,
   formatWeekRange,
   lastPerformance,
-  orderLabels,
+  workoutExerciseGroups,
   parseISODate,
   removeWorkout,
   resizeSets,
@@ -303,7 +303,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
     return result.status;
   };
 
-  const labels = workout ? orderLabels(workout.blocks) : [];
+  const groups = workout ? workoutExerciseGroups(workout.blocks) : [];
   const status = workout ? effectiveStatus(workout, today) : null;
 
   return (
@@ -506,25 +506,26 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                 {workout.blocks.map((b, i) => {
                   const last = lastPerformance(client, b.exerciseId, selectedDate);
                   const done = b.loggedSets.filter((s) => s.completed);
-                  const isPaired = !!b.supersetWithPrevious;
-                  const startsSuperset = !isPaired && !!workout.blocks[i + 1]?.supersetWithPrevious;
-                  const inSuperset = isPaired || startsSuperset;
+                  const { label, groupLabel, groupSize, isPaired, startsSuperset, inSuperset } = groups[i];
                   return (
                     <div
                       key={b.id}
+                      data-editor-exercise={label}
+                      data-superset-member={inSuperset ? groupLabel : undefined}
                       className={`rounded-2xl border p-3.5 sm:p-4 ${b.pain ? 'border-[#FCA5A5] bg-[#FFF7F7]' : 'border-gray-200'} ${
                         inSuperset ? 'border-l-4 border-l-[#FFC809] bg-[#FFFDF5]/40' : ''
                       }`}
                     >
                       {startsSuperset && (
                         <div className="mb-3 rounded-lg bg-[#FFF4CF] px-3 py-2 text-xs font-semibold text-[#92400E]" role="note">
-                          Superset {labels[i].replace(/\d+$/, '')} · Alternate these exercises before resting
+                          Superset {groupLabel} · Alternate these exercises before resting
+                          <span className="block mt-0.5">{groupSize} exercises</span>
                         </div>
                       )}
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="flex items-start gap-2.5 min-w-0">
                           <span className="min-w-7 h-7 px-1.5 rounded-lg bg-[#111827] text-[#FFC809] text-xs font-bold flex items-center justify-center shrink-0">
-                            {labels[i]}
+                            {label}
                           </span>
                           <div className="min-w-0">
                             <div className="text-sm sm:text-base font-semibold text-[#111827] leading-snug">{b.name}</div>
