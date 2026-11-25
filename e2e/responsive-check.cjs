@@ -109,6 +109,9 @@ async function measure(p) {
     const checkWorkspace = async (activeId) => {
       const nav = p.getByRole('navigation', { name:'Client workspace sections' });
       await nav.waitFor({state:'visible'});
+      // Inspect resting colors, not hover or an intermediate transition frame.
+      await p.mouse.move(0,0);
+      await p.waitForTimeout(250);
       const state = await nav.evaluate((el, args) => {
         const buttons = [...el.querySelectorAll('[data-client-section-tab]')];
         const rows = new Set(buttons.map(b => Math.round(b.getBoundingClientRect().top))).size;
