@@ -39,6 +39,7 @@ import {
 } from '../../lib/workouts';
 
 interface ClientTodayViewProps {
+  wide?: boolean;
   client: ClientProfile;
   onUpdateClient: (updated: ClientProfile) => void;
 }
@@ -47,7 +48,7 @@ const card = 'bg-white rounded-2xl p-4 sm:p-5 shadow-[0_2px_14px_rgba(0,0,0,0.04
 const cellInput =
   'w-full min-w-0 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-base text-[#111827] tabular-nums text-center focus:outline-none focus:border-[#111827] disabled:bg-gray-50 disabled:text-gray-500';
 
-export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpdateClient }) => {
+export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpdateClient, wide = false }) => {
   const today = todayISO();
   const { getExercise } = useExerciseLibrary();
   const [weekStart, setWeekStart] = useState(startOfWeek(today));
@@ -147,7 +148,7 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
   const videoExercise = videoFor ? getExercise(videoFor) : undefined;
 
   return (
-    <div className="max-w-lg mx-auto pb-8">
+    <div className={`w-full min-w-0 mx-auto pb-8 ${wide ? 'max-w-lg md:max-w-none' : 'max-w-lg'}`}>
       {/* Header */}
       <div className="mb-4">
         <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -495,7 +496,7 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
 
       {/* Rest timer */}
       {rest && (
-        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-40 w-[calc(100%-2rem)] max-w-sm bg-[#111827] text-white rounded-2xl shadow-xl px-4 py-3 flex items-center gap-3">
+        <div className={`fixed left-1/2 -translate-x-1/2 bottom-24 z-40 w-[calc(100%-2rem)] max-w-sm bg-[#111827] text-white rounded-2xl shadow-xl px-4 py-3 flex items-center gap-3 ${wide ? 'md:bottom-6' : ''}`}>
           <Clock className="w-5 h-5 text-[#FFC809] shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold tabular-nums">

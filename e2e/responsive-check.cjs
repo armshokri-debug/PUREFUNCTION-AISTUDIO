@@ -13,7 +13,7 @@ http.createServer((q, r) => {
   r.writeHead(200, { 'content-type': type }); r.end(fs.readFileSync(f));
 }).listen(PORT);
 
-const VP = { desktop: { width: 1440, height: 900 }, mobile: { width: 375, height: 812 }, tablet: { width: 768, height: 1024 }, tabletL: { width: 1024, height: 768 } };
+const VP = { desktop: { width: 1440, height: 900 }, laptop: { width: 1280, height: 800 }, mobile: { width: 375, height: 812 }, tablet: { width: 768, height: 1024 }, tabletL: { width: 1024, height: 768 } };
 
 async function measure(p) {
   return p.evaluate(() => {
@@ -110,7 +110,41 @@ async function measure(p) {
     }
     if (await click(p.getByRole('button', { name: /^Client$/ }))) {
       await report('clientapp-today');
-      for (const t of ['Progress', 'Chat', 'Refer', 'Today']) if (await click(p.getByRole('button', { name: new RegExp(t, 'i') }))) await report('clientapp-' + t);
+      const clientNav = p.getByRole('navigation', {name:'Client navigation'});
+      const assertClient = async (name, test) => {
+        const pass = await test;
+        if (!pass) failures++;
+        console.log(`${pass ? 'ok' : 'XX'} [${vn}] client layout: ${name}`);
+      };
+      await assertClient('navigation changes from bottom to desktop top',
+        clientNav.evaluate(el=>getComputedStyle(el).position === (window.innerWidth < 768 ? 'fixed' : 'static')));
+      const todayLayout = p.locator('[data-client-today-layout]');
+      await assertClient('Today uses two columns only at desktop widths',
+        todayLayout.evaluate(el=>{
+          const main = el.querySelector('[data-client-today-workout]').getBoundingClientRect();
+          const side = el.querySelector('[data-client-today-support]').getBoundingClientRect();
+          return window.innerWidth >= 1024 ? main.right < side.left + 1 && main.width > side.width && el.clientWidth > 850 : Math.abs(main.left-side.left)<2;
+        }));
+      for (const t of ['Progress', 'Chat', 'Refer', 'Today']) {
+        if (!(await click(clientNav.getByRole('button', { name:t, exact:true })))) { unvisited++; continue; }
+        await report('clientapp-' + t);
+        if (t === 'Progress' || t === 'Refer') {
+          const layout = p.locator(t === 'Progress' ? '[data-client-progress-layout]' : '[data-client-refer-layout]');
+          await assertClient(t+' has adaptive columns',layout.evaluate(el=>{
+            const cols = getComputedStyle(el).gridTemplateColumns.split(' ').length;
+            return cols === (window.innerWidth>=1024 ? 2 : 1) && (window.innerWidth<1024 || el.clientWidth>850);
+          }));
+        }
+        if(t==='Chat') await assertClient('Chat is wider on desktop',
+          p.locator('[data-client-chat-layout]').evaluate(el=>window.innerWidth<1024||el.clientWidth>800));
+      }
+      if (vp.width >= 768) {
+        const preview=p.getByRole('button',{name:'Phone frame',exact:true});
+        await preview.click();
+        await assertClient('explicit phone preview stays narrow',todayLayout.evaluate(el=>el.clientWidth<450 && getComputedStyle(el).gridTemplateColumns.split(' ').length===1));
+        await p.getByRole('button',{name:'Full width',exact:true}).click();
+        await report('clientapp-full-width');
+      }
     } else { console.log(`?? [${vn}] no client switch`); unvisited++; }
     if (errs.length) { failures++; console.log(`!! [${vn}] page errors: ${[...new Set(errs)].slice(0, 3).join(' | ')}`); }
     await ctx.close();

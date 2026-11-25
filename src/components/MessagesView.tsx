@@ -212,11 +212,11 @@ export const CoachMessages: React.FC<{ clients: ClientProfile[]; initialClientId
 };
 
 /** Client side: one thread with the coach. */
-export const ClientMessages: React.FC<{ clientId: string }> = ({ clientId }) => {
+export const ClientMessages: React.FC<{ clientId: string; wide?: boolean }> = ({ clientId, wide = false }) => {
   const data = useMessages(clientId);
   return (
-    <div className="max-w-lg mx-auto">
-      <div className="bg-white rounded-[28px] border border-gray-100 shadow-[0_2px_14px_rgba(0,0,0,0.04)] overflow-hidden h-[calc(100vh-190px)] min-h-[420px]">
+    <div data-client-chat-layout className={`w-full min-w-0 mx-auto ${wide ? 'max-w-lg md:max-w-5xl' : 'max-w-lg'}`}>
+      <div className={`bg-white rounded-[28px] border border-gray-100 shadow-[0_2px_14px_rgba(0,0,0,0.04)] overflow-hidden h-[calc(100dvh-190px)] min-h-[320px] ${wide ? 'md:h-[calc(100dvh-200px)]' : ''}`}>
         <Thread clientId={clientId} me="client" title="Coach" subtitle="Pure Function" data={data} />
       </div>
     </div>

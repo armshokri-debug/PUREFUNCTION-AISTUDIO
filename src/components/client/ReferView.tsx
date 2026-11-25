@@ -23,7 +23,7 @@ const STATUS_STYLE: Record<Referral['status'], string> = {
   declined: 'bg-gray-100 text-gray-400'
 };
 
-export const ReferView: React.FC<{ firstName?: string }> = ({ firstName }) => {
+export const ReferView: React.FC<{ firstName?: string; wide?: boolean }> = ({ firstName, wide = false }) => {
   const [code, setCode] = useState<string | null>(null);
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
@@ -77,8 +77,8 @@ export const ReferView: React.FC<{ firstName?: string }> = ({ firstName }) => {
   };
 
   return (
-    <div className="max-w-lg mx-auto space-y-4 pb-8">
-      <div>
+    <div data-client-refer-layout className={`mx-auto w-full min-w-0 grid grid-cols-1 gap-4 pb-8 items-start [&>*]:min-w-0 ${wide ? 'max-w-lg md:max-w-none lg:grid-cols-2 lg:gap-6' : 'max-w-lg'}`}>
+      <div className={wide ? 'lg:col-span-2' : undefined}>
         <h1 className="text-2xl font-bold tracking-tight text-[#111827] mt-0.5">Refer</h1>
       </div>
 

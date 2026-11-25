@@ -11,13 +11,15 @@ import { WEIGHT_UNIT, formatWeight, roundLb } from '../../lib/units';
 import { getClientBodyCompAlert } from '../../lib/bodyCompAlerts';
 
 interface ClientProgressViewProps {
+  wide?: boolean;
   client: ClientProfile;
   onUpdateClient?: (c: ClientProfile) => void;
 }
 
 export const ClientProgressView: React.FC<ClientProgressViewProps> = ({
   client,
-  onUpdateClient
+  onUpdateClient,
+  wide = false
 }) => {
   const history = client.progressHistory;
   const bodyCompAlert = getClientBodyCompAlert(client);
@@ -45,9 +47,9 @@ export const ClientProgressView: React.FC<ClientProgressViewProps> = ({
   ];
 
   return (
-    <div className="max-w-lg mx-auto w-full min-w-0 space-y-4 pb-8">
+    <div data-client-progress-layout className={`mx-auto w-full min-w-0 grid grid-cols-1 gap-4 pb-8 items-start ${wide ? 'max-w-lg md:max-w-none lg:grid-cols-2 lg:gap-6' : 'max-w-lg'}`}>
       {/* Page Title */}
-      <div>
+      <div className={wide ? 'lg:col-span-2' : undefined}>
         <span className="text-xs font-semibold text-gray-500">
           {client.name} · Week {client.currentWeek}
         </span>
@@ -59,7 +61,7 @@ export const ClientProgressView: React.FC<ClientProgressViewProps> = ({
         <div
           role="region"
           aria-label={bodyCompAlert.title}
-          className="bg-[#FFFDF5] rounded-2xl p-4 sm:p-5 border border-[#FFC809]/60 shadow-[0_2px_14px_rgba(0,0,0,0.03)]"
+          className={`bg-[#FFFDF5] rounded-2xl p-4 sm:p-5 border border-[#FFC809]/60 shadow-[0_2px_14px_rgba(0,0,0,0.03)] ${wide ? 'lg:col-span-2' : ''}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
             <h2 className="text-sm font-bold text-[#111827]">{bodyCompAlert.title}</h2>
@@ -73,20 +75,20 @@ export const ClientProgressView: React.FC<ClientProgressViewProps> = ({
         </div>
       )}
       {(client.goals?.length ?? 0) > 0 && (
-        <GoalsPanel goals={client.goals!} assessments={client.assessments ?? []} />
+        <div className={wide ? 'min-w-0 lg:col-span-2' : 'min-w-0'}><GoalsPanel goals={client.goals!} assessments={client.assessments ?? []} /></div>
       )}
-      <ClientProgressCharts client={client} />
-      <BodyLab client={client} compact />
-      <BeforeAfter client={client} />
-      <RecordsPanel client={client} onUpdateClient={onUpdateClient} by="client" />
+      <div data-client-progress-charts className={`min-w-0 ${wide ? 'lg:order-1' : ''}`}><ClientProgressCharts client={client} /></div>
+      <div className={`min-w-0 ${wide ? 'lg:col-span-2 lg:order-3' : ''}`}><BodyLab client={client} compact={!wide} /></div>
+      <div className={`min-w-0 ${wide ? 'lg:col-span-2 lg:order-4' : ''}`}><BeforeAfter client={client} /></div>
+      <div data-client-progress-records className={`min-w-0 ${wide ? 'lg:order-2' : ''}`}><RecordsPanel client={client} onUpdateClient={onUpdateClient} by="client" /></div>
 
       {history.length === 0 ? (
-        <EmptyProgress
+        <div className={wide ? 'lg:col-span-2 lg:order-5' : undefined}><EmptyProgress
           title="Your progress starts here"
           text="After your first assessment and a few logged workouts, your strength, body composition and symmetry charts show up here."
-        />
+        /></div>
       ) : (
-        <>
+        <div className={`grid grid-cols-1 gap-4 min-w-0 ${wide ? 'lg:col-span-2 lg:order-5 lg:grid-cols-2 lg:gap-6' : ''}`}>
           {/* 1. Phase Progress Card */}
       <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-[0_2px_14px_rgba(0,0,0,0.04)] border border-gray-100">
         <div className="flex items-center justify-between mb-3">
@@ -316,7 +318,7 @@ export const ClientProgressView: React.FC<ClientProgressViewProps> = ({
           </div>
         </div>
       </div>
-        </>
+        </div>
       )}
     </div>
   );
