@@ -596,6 +596,41 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
       </header>
 
       {/* =====================================================================
+          CLIENT RESPONSIVE NAVIGATION
+         ===================================================================== */}
+      {role === 'client' && (
+        <nav aria-label="Client navigation" className={`no-print fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 z-40 pb-[env(safe-area-inset-bottom)] ${clientPreviewFrame ? '' : 'md:static md:z-auto md:border-t-0 md:border-b md:pb-0'}`}>
+          <div className={`mx-auto grid grid-cols-4 gap-1.5 px-3 py-2 ${clientPreviewFrame ? 'max-w-md' : 'max-w-md md:max-w-3xl lg:max-w-7xl md:flex md:justify-center md:gap-3 md:px-6'}`}>
+            {([
+              { id: 'today', label: 'Today', icon: CalendarCheck },
+              { id: 'progress', label: 'Progress', icon: TrendingUp },
+              { id: 'messages', label: 'Chat', icon: MessageCircle },
+              { id: 'refer', label: 'Refer', icon: Gift }
+            ] as const).map((t) => {
+              const Icon = t.icon;
+              const active = clientTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setClientTab(t.id)}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative min-h-[44px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-full text-[11px] font-semibold transition-colors cursor-pointer ${clientPreviewFrame ? '' : 'md:flex-row md:gap-2 md:px-6 md:text-sm md:rounded-xl'} ${
+                    active ? 'bg-[#111827] text-white' : 'text-gray-500 hover:text-[#111827]'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{t.label}</span>
+                  {t.id === 'messages' && unreadCount > 0 && (
+                    <span aria-label={`${unreadCount} unread messages`} className="absolute top-0 right-1 min-w-5 h-5 px-1 rounded-full bg-[#FFC809] text-[#111827] font-bold text-[10px]">{unreadCount > 99 ? '99+' : unreadCount}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      )}
+
+      {/* =====================================================================
           MAIN VIEWPORT CANVAS
          ===================================================================== */}
       {role === 'coach' ? (
@@ -679,13 +714,13 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
           </div>
         </main>
       ) : (
-        /* CLIENT MOBILE-FIRST VIEWPORT */
-        <main className="flex-1 min-w-0 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 px-4">
+        /* CLIENT RESPONSIVE VIEWPORT */
+        <main data-client-workspace className={`flex-1 min-w-0 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 px-4 ${clientPreviewFrame ? '' : 'md:pb-8 md:px-6 md:pt-6 lg:px-8'}`}>
           <div
             className={
               clientPreviewFrame
                 ? 'md:max-w-[430px] md:mx-auto md:bg-[#F7F8FA] md:rounded-[32px] md:border-[6px] md:border-[#111827] md:shadow-xl md:p-5 md:my-2'
-                : 'max-w-xl mx-auto'
+                : 'max-w-xl md:max-w-3xl lg:max-w-7xl mx-auto w-full min-w-0'
             }
           >
             {role === 'client' && !clientPreviewFrame && <InstallCard />}
@@ -707,22 +742,23 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
                 Your coach is setting up your profile. Pull to refresh in a moment.
               </div>
             ) : clientTab === 'today' ? (
-              <>
-              <CoachNotesCard client={selectedClient} />
-              <PostureReports clientId={selectedClient.id} />
-              <FoodDiary clientId={selectedClient.id} />
-              <NutritionTodayCard client={selectedClient} onUpdateClient={handleUpdateClient} />
-              <ClientTodayView
-                client={selectedClient}
-                onUpdateClient={handleUpdateClient}
-              />
-              </>
+              <div data-client-today-layout className={`grid grid-cols-1 gap-4 items-start ${clientPreviewFrame ? '' : 'lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] lg:gap-6'}`}>
+                <div data-client-today-support className={`min-w-0 ${clientPreviewFrame ? '' : 'lg:order-2'}`}>
+                  <CoachNotesCard client={selectedClient} />
+                  <PostureReports clientId={selectedClient.id} />
+                  <FoodDiary clientId={selectedClient.id} />
+                  <NutritionTodayCard client={selectedClient} onUpdateClient={handleUpdateClient} />
+                </div>
+                <div data-client-today-workout className={`min-w-0 ${clientPreviewFrame ? '' : 'lg:order-1'}`}>
+                  <ClientTodayView client={selectedClient} onUpdateClient={handleUpdateClient} wide={!clientPreviewFrame} />
+                </div>
+              </div>
             ) : clientTab === 'messages' ? (
-              <ClientMessages clientId={selectedClient.id} />
+              <ClientMessages clientId={selectedClient.id} wide={!clientPreviewFrame} />
             ) : clientTab === 'refer' ? (
-              <ReferView firstName={selectedClient.name.split(' ')[0]} />
+              <ReferView firstName={selectedClient.name.split(' ')[0]} wide={!clientPreviewFrame} />
             ) : (
-              <ClientProgressView client={selectedClient} onUpdateClient={handleUpdateClient} />
+              <ClientProgressView client={selectedClient} onUpdateClient={handleUpdateClient} wide={!clientPreviewFrame} />
             )}
           </div>
         </main>
@@ -767,39 +803,7 @@ function Workspace({ store, profile }: { store: ClientsStore; profile: Profile |
         </nav>
       )}
 
-      {/* =====================================================================
-          CLIENT BOTTOM NAVIGATION BAR (Today | My Progress)
-         ===================================================================== */}
-      {role === 'client' && (
-        <nav className="no-print fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 z-40 pb-[env(safe-area-inset-bottom)]">
-          <div className="max-w-md mx-auto grid grid-cols-4 gap-1.5 px-3 py-2">
-            {([
-              { id: 'today', label: 'Today', icon: CalendarCheck },
-              { id: 'progress', label: 'Progress', icon: TrendingUp },
-              { id: 'messages', label: 'Chat', icon: MessageCircle },
-              { id: 'refer', label: 'Refer', icon: Gift }
-            ] as const).map((t) => {
-              const Icon = t.icon;
-              const active = clientTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setClientTab(t.id)}
-                  className={`relative min-h-[44px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-full text-[11px] font-semibold transition-colors cursor-pointer ${
-                    active ? 'bg-[#111827] text-white' : 'text-gray-500 hover:text-[#111827]'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{t.label}</span>
-                  {t.id === 'messages' && unreadCount > 0 && (
-                    <span aria-label={`${unreadCount} unread messages`} className="absolute top-0 right-1 min-w-5 h-5 px-1 rounded-full bg-[#FFC809] text-[#111827] font-bold text-[10px]">{unreadCount > 99 ? '99+' : unreadCount}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-      )}
+
     </div>
   );
 }
