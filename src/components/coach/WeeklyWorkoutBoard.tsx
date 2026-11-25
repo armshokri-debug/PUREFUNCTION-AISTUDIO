@@ -15,6 +15,7 @@ interface WeeklyWorkoutBoardProps {
   client: ClientProfile;
   days: string[];
   selectedDate: string;
+  today: string;
   onSelectDate: (date: string) => void;
   onTransfer: (
     sourceDate: string,
@@ -27,7 +28,7 @@ interface WeeklyWorkoutBoardProps {
 /** Coach-only, seven-day overview. Desktop shows the entire week; touch devices
  * swipe the horizontally scrolling row. Day editing stays in the existing builder. */
 export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
-  client, days, selectedDate, onSelectDate, onTransfer
+  client, days, selectedDate, today, onSelectDate, onTransfer
 }) => {
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [replace, setReplace] = useState<PendingReplace | null>(null);
@@ -82,11 +83,22 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
             const logged = Boolean(workout && hasResults(workout));
             const movingBlocked = Boolean(workout && (logged || workout.status !== 'planned'));
             const selected = date === selectedDate;
+            const isToday = date === today;
             const hovered = date === hoverDate;
             const shortDate = `${dayShort(date)} ${formatDate(date)}`;
             return (
               <article key={date}
                 aria-label={`${formatDate(date, { weekday: true })} workout`}
+                data-day-date={date}
+                data-day-selected={selected}
+                data-day-today={isToday}
+                onClick={(e) => {
+                  // Keep nested controls independent; touch scrolling and native dragging do not select a day.
+                  if (e.defaultPrevented || !(e.target instanceof Element) ||
+                      e.target.closest('button, a, input, select, textarea, [role="button"]')) return;
+                  if (window.getSelection()?.toString()) return;
+                  if (!selected) onSelectDate(date);
+                }}
                 draggable={Boolean(workout) && !movingBlocked}
                 onDragStart={(e) => {
                   if (!workout || movingBlocked) { e.preventDefault(); return; }
@@ -111,15 +123,18 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                     attempt(value.fromDate, date, 'move');
                   } catch { /* Ignore non-workout drag payloads. */ }
                 }}
-                className={`min-w-0 rounded-2xl border bg-white p-2.5 sm:p-3 flex flex-col ${hovered ? 'ring-2 ring-[#FFC809] border-[#FFC809]' : selected ? 'border-[#111827] shadow-sm' : 'border-gray-200'}`}
+                className={`min-w-0 rounded-2xl border p-2.5 sm:p-3 flex flex-col cursor-pointer transition-colors ${isToday ? 'bg-[#FFF4CF]' : 'bg-white'} ${hovered ? 'ring-2 ring-[#FFC809] border-[#FFC809]' : selected ? 'border-[#111827] ring-1 ring-inset ring-[#111827] shadow-sm' : isToday ? 'border-[#D97706]' : 'border-gray-200 hover:border-gray-400'}`}
               >
                 <button type="button" onClick={() => onSelectDate(date)}
                   aria-label={formatDate(date, { weekday: true })}
+                  aria-pressed={selected}
+                  aria-current={isToday ? 'date' : undefined}
                   title="Select day to edit workout"
                   className="w-full flex items-center justify-between gap-1 rounded-lg px-1 py-1 text-left hover:bg-gray-50 cursor-pointer">
                   <span className="text-xs font-bold text-[#111827]">{dayShort(date)} {parseISODate(date).getDate()}</span>
                   {selected && <span className="text-[10px] font-bold text-[#B45309]">Editing</span>}
                 </button>
+                {isToday && <div className="mt-1 self-start rounded-full bg-[#FFC809] px-2 py-0.5 text-[10px] font-bold text-[#111827]">Today</div>}
                 <div className="flex items-center justify-between gap-1 mt-2 mb-2">
                   <span className="text-[10px] font-semibold text-gray-500">{workout ? status : 'Rest day'}</span>
                   {workout && !movingBlocked && <Grip className="w-3.5 h-3.5 text-gray-400" aria-label="Drag workout to another day" />}

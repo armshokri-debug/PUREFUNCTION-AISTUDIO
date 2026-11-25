@@ -28,13 +28,32 @@ async function openBuilder(p) {
   await heading.waitFor();
 }
 async function run(viewport) {
-  const context = await browser.newContext({viewport,serviceWorkers:'block'});
+  const context = await browser.newContext({viewport,hasTouch:viewport.width<800,serviceWorkers:'block'});
   const page = await context.newPage();
   const exceptions=[];
   page.on('pageerror',e=>exceptions.push(e.message));
   try {
     await page.goto(`http://localhost:${PORT}/`);
     await openBuilder(page);
+    const currentBoard = page.getByRole('region',{name:'Weekly workout overview'});
+    const currentDay = currentBoard.locator('[data-day-today="true"]');
+    const otherDay = currentBoard.locator('[data-day-today="false"]').first();
+    const activate = async locator => viewport.width < 800 ? locator.tap() : locator.click();
+    await requireTrue('exactly one actual local today card', currentDay.count().then(n=>n===1));
+    await requireTrue('today badge and semantic date marker exist',
+      currentDay.getByText('Today',{exact:true}).isVisible());
+    await requireTrue('today is visually distinguished from other days',
+      Promise.all([currentDay,otherDay].map(card=>card.evaluate(el=>getComputedStyle(el).backgroundColor)))
+        .then(([a,b])=>a!==b));
+    await activate(otherDay.getByRole('button').first());
+    await requireTrue('selecting another date does not remove today marker',
+      currentDay.locator('button[aria-current="date"]').count().then(n=>n===1));
+    await requireTrue('today remains distinct when not selected',
+      currentDay.getAttribute('data-day-selected').then(v=>v==='false'));
+    await activate(currentDay.getByText('Today',{exact:true}));
+    await requireTrue('tapping the body of today selects it',
+      currentDay.getAttribute('data-day-selected').then(v=>v==='true'));
+
     // Synthetic demo ships with weekday workouts; test two weeks ahead to
     // avoid replacing seeded plans while verifying empty-day move/copy.
     await page.getByRole('button',{name:'Next week'}).click();
@@ -44,7 +63,11 @@ async function run(viewport) {
     const tuesday=board.getByRole('article',{name:/^Tue, .* workout$/});
     const thursday=board.getByRole('article',{name:/^Thu, .* workout$/});
     const friday=board.getByRole('article',{name:/^Fri, .* workout$/});
-    await tuesday.getByRole('button',{name:/^Tue, /}).click();
+    await requireTrue('today is not falsely highlighted in a future week',
+      board.locator('[data-day-today="true"]').count().then(n=>n===0));
+    await activate(tuesday.getByText('No workout planned',{exact:true}));
+    await requireTrue('tapping a rest-day card body selects it',
+      tuesday.getAttribute('data-day-selected').then(v=>v==='true'));
     const create=page.getByRole('button',{name:'Create workout'});
     if (await create.isVisible()) await create.click();
 
@@ -89,6 +112,15 @@ async function run(viewport) {
     await requireTrue('copy preserves all Friday exercise prescriptions',
       friday.getByText('Stability Ball Body Saw').isVisible());
     await assertGroup(friday, ['A1','A2','A3'],3);
+    await activate(tuesday.locator('[data-weekly-exercise="A1"]'));
+    await requireTrue('tapping an exercise inside a card selects its day',
+      tuesday.getAttribute('data-day-selected').then(v=>v==='true'));
+    await requireTrue('editor follows full-card selection',
+      editorLabels().then(labels=>JSON.stringify(labels)===JSON.stringify(['A1','A2','A3'])));
+    await activate(friday.getByRole('button',{name:/Copy Fri /}));
+    await requireTrue('copy on a different card does not select it',
+      tuesday.getAttribute('data-day-selected').then(v=>v==='true'));
+    await board.getByRole('button',{name:'Cancel workout transfer'}).click();
 
     if (viewport.width >= 800) {
       await friday.dragTo(thursday);
