@@ -99,6 +99,14 @@ async function measure(p) {
     const row = p.locator('main').getByText('Alex Carter', { exact: true });
     if (!(await click(row))) { console.log(`?? [${vn}] no client row`); unvisited++; }
     await report('client');
+    const tiles = p.locator('[data-client-workspace-action]:visible');
+    const tileStyleOK = await tiles.evaluateAll(nodes => nodes.length === 6 && nodes.every(el => {
+      const icon=el.querySelector('svg');
+      const label=el.querySelector('div div');
+      return getComputedStyle(el).backgroundColor === 'rgb(17, 24, 39)' && !!icon && getComputedStyle(icon).color === 'rgb(255, 200, 9)' && !!label && getComputedStyle(label).color === 'rgb(255, 255, 255)';
+    }));
+    if (!tileStyleOK) failures++;
+    console.log(`${tileStyleOK ? 'ok' : 'XX'} [${vn}] six charcoal client tiles, yellow icons, white labels`);
     for (const tab of ['Exercises', 'Assessment', 'Notes', 'Goals', 'Progression', 'Nutrition']) {
       if (!(await click(p.getByRole('tab', { name: tab })))) if (!(await click(p.getByRole('button', { name: new RegExp('^' + tab + '$') })))) { console.log(`?? [${vn}] no tab ${tab}`); unvisited++; continue; }
       await report('tab-' + tab);

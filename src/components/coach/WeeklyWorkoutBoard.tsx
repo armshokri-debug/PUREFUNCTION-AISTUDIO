@@ -166,6 +166,7 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                     </div>
                   </>
                 ) : <p className="flex-1 text-xs text-gray-400 pt-2 pb-5">No workout planned</p>}
+                {(workout || (clipboard && clipboard.fromDate !== date)) && (
                 <div className="mt-3 pt-2 border-t border-gray-100 space-y-1.5">
                   {workout && (
                     <div className="grid grid-cols-2 gap-1">
@@ -192,12 +193,8 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
                       Paste here
                     </button>
                   )}
-                  <button type="button" aria-label={`Open ${shortDate} editor`}
-                    onClick={() => onSelectDate(date)}
-                    className="w-full min-h-[32px] text-[11px] font-medium text-gray-600 underline cursor-pointer">
-                    Edit day
-                  </button>
                 </div>
+                )}
               </article>
             );
           })}
