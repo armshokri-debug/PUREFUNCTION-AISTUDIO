@@ -712,19 +712,23 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             />
           </div>
 
-          <div className="flex flex-wrap min-w-0 items-center gap-1.5 pb-2 mb-2">
-            {['All', ...MUSCLE_GROUPS].map((part) => (
-              <button
-                key={part}
-                onClick={() => setBodyPart(part)}
-                className={`min-h-[44px] px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer whitespace-nowrap ${
-                  bodyPart === part ? 'bg-[#111827] text-white' : 'bg-[#F3F4F6] text-gray-600 hover:text-[#111827]'
-                }`}
-              >
-                {part}
-              </button>
-            ))}
-          </div>
+          <label className={`relative mb-3 flex min-h-[44px] w-full min-w-0 items-center gap-2 rounded-xl border px-3 focus-within:ring-2 focus-within:ring-[#111827]/20 ${
+            bodyPart === 'All' ? 'bg-gray-50 border-gray-200' : 'bg-[#FFF4CF] border-[#E5C65B]'
+          }`}>
+            <span className="text-xs font-semibold text-[#111827] shrink-0 pointer-events-none">Categories</span>
+            <select
+              aria-label="Categories"
+              value={bodyPart}
+              onChange={(e) => setBodyPart(e.target.value)}
+              className="absolute inset-0 h-full w-full appearance-none rounded-xl bg-transparent text-transparent cursor-pointer focus:outline-none text-base"
+            >
+              {['All', ...MUSCLE_GROUPS].map((part) => (
+                <option key={part} value={part} className="text-[#111827] bg-white">{part}</option>
+              ))}
+            </select>
+            <span aria-hidden="true" className="ml-auto min-w-0 truncate text-right text-sm font-medium text-[#111827] pointer-events-none">{bodyPart}</span>
+            <ChevronDown aria-hidden="true" className="w-4 h-4 text-gray-600 shrink-0 pointer-events-none" />
+          </label>
 
             {customAvailable && (
               <button type="button" onClick={() => addCustomExercise(customName)}
@@ -740,6 +744,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             {results.slice(0, LIST_LIMIT).map((ex) => (
               <div
                 key={ex.id}
+                data-library-group={groupOf(ex)}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData('text/plain', ex.id);

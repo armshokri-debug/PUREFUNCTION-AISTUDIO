@@ -39,6 +39,17 @@ async function run(viewport) {
     const create = p.getByRole('button', { name: 'Create workout' });
     if (await create.isVisible()) await create.click();
     const search = p.getByRole('textbox', { name: 'Search exercises or enter a custom exercise name' });
+    const categories = p.getByRole('combobox', {name:'Categories'});
+    await check('one compact category selector is visible', categories.count().then(n=>n===1));
+    const options = await categories.locator('option').allTextContents();
+    await check('all original muscle categories are preserved', Promise.resolve(options.join('|') === ['All','Chest','Back','Shoulders','Biceps','Triceps','Quads','Hamstrings','Glutes','Calves','Hips & Adductors','Core','Full Body','Mobility & Breathing'].join('|')));
+    await categories.selectOption('Chest');
+    const groups = () => p.locator('[data-library-group]').evaluateAll(nodes => nodes.map(n => n.getAttribute('data-library-group')));
+    await check('Chest category filters actual exercise rows', groups().then(a=>a.length>0 && a.every(g=>g==='Chest')));
+    await categories.selectOption('Back');
+    await check('Back category filters actual exercise rows', groups().then(a=>a.length>0 && a.every(g=>g==='Back')));
+    await categories.selectOption('All');
+    await check('All restores the mixed catalog', groups().then(a=>new Set(a).size>1));
     await search.fill('Stability Ball Body Saw');
     await p.getByRole('button', { name: 'Add custom exercise Stability Ball Body Saw' }).click();
     await check('custom movement appears in the prescribed workout', p.getByText('Stability Ball Body Saw', { exact:true }).first().isVisible());
