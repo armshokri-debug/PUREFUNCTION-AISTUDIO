@@ -909,7 +909,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       ? 'Coordinated functional movement.'
                       : newPhase === '3-Strength'
                         ? 'Progressive strength training.'
-                        : 'Sport- or goal-specific performance.'} 
+                        : 'Sport- or goal-specific performance.'}
                 </p>
               </div>
 

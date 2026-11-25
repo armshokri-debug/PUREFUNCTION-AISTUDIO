@@ -129,7 +129,7 @@ export const ReferView: React.FC<{ firstName?: string }> = ({ firstName }) => {
         )}
         <p className="text-xs text-gray-500 mt-3">
           Earn{' '}
-          {creditPer ? <b>{formatMoney(creditPer)}</b> : 'credit'} per paying referral.
+          {creditPer ? <b>{formatMoney(creditPer)}</b> : 'credit'} toward purchases per paying referral.
         </p>
       </div>
 

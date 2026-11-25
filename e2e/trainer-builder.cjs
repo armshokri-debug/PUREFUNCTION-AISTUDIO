@@ -50,7 +50,7 @@ async function run(viewport) {
     await check('Back category filters actual exercise rows', groups().then(a=>a.length>0 && a.every(g=>g==='Back')));
     await categories.selectOption('All');
     await check('All restores the mixed catalog', groups().then(a=>new Set(a).size>1));
-    const details = p.locator('details').filter({has:p.getByText('Workout details',{exact:true})});
+    const details = p.locator('details').filter({hasText:'Workout details'});
     const focus = p.getByRole('textbox', {name:'Workout focus'});
     const notes = p.getByRole('textbox', {name:'Client notes'});
     await check('optional workout details are collapsed by default', focus.isVisible().then(v=>!v));
@@ -90,7 +90,7 @@ async function run(viewport) {
     await check('superset pairing persists after reload',
       p.locator('[data-editor-exercise][data-superset-linked="true"]').count().then((count) => count === pairedAfter));
     await check('details start collapsed after reload', focus.isVisible().then(v=>!v));
-    await p.locator('details').filter({has:p.getByText('Workout details',{exact:true})}).locator('summary').click();
+    await p.locator('details').filter({hasText:'Workout details'}).locator('summary').click();
     await check('saved workout focus and notes survive reload', Promise.all([focus.inputValue(),notes.inputValue()]).then(([a,b])=>a==='Synthetic focus'&&b==='Synthetic coach notes'));
     const width = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     await check(`no horizontal overflow at ${viewport.width}px`, Promise.resolve(width <= 1));
