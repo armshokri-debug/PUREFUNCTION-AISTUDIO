@@ -7,16 +7,11 @@ import {
   ChevronRight,
   Send,
   Pencil,
-  RotateCcw,
-  Dumbbell,
-  ClipboardCheck,
-  StickyNote,
-  Target,
-  LineChart,
-  Utensils
+  RotateCcw
 } from 'lucide-react';
 import { ClientInviteModal, type ClientModalMode } from './ClientInviteModal';
 import { ClientActionMenu } from './ClientActionMenu';
+import { ClientWorkspaceNavigation } from './ClientWorkspaceNavigation';
 import { ClientDeleteModal, type DeleteClientOutcome } from './ClientDeleteModal';
 import { ClientProfile, ClientSection } from '../../types';
 import { ClientAvatar } from '../VisualAssets';
@@ -266,65 +261,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     : joinedIds
       ? 'Account Access'
       : 'Invite Link';
-
-  const workspaceSections = useMemo(() => {
-    if (!activeSelection || !selectedSnapshot) return [];
-    return [
-      {
-        id: 'exercises' as ClientSection,
-        label: 'Exercises',
-        hint:
-          activeSelection.adherenceTotal > 0
-            ? `${activeSelection.adherenceCompleted}/${activeSelection.adherenceTotal} this week · ${selectedSnapshot.completedWorkouts} logged`
-            : 'Workouts & schedule',
-        icon: Dumbbell
-      },
-      {
-        id: 'assessment' as ClientSection,
-        label: 'Assessment',
-        hint:
-          selectedSnapshot.completedAssessments > 0
-            ? `${selectedSnapshot.completedAssessments} completed · ROM & PRI`
-            : 'ROM, PRI & posture',
-        icon: ClipboardCheck
-      },
-      {
-        id: 'progression' as ClientSection,
-        label: 'Progression',
-        hint:
-          selectedSnapshot.progressPointsCount > 0
-            ? `${selectedSnapshot.progressPointsCount} checkpoints · trends & 1RM`
-            : 'Trends & 1RM charts',
-        icon: LineChart
-      },
-      {
-        id: 'goals' as ClientSection,
-        label: 'Goals',
-        hint:
-          selectedSnapshot.goalsCount > 0
-            ? `${selectedSnapshot.goalsCount} active targets`
-            : 'Targets & milestones',
-        icon: Target
-      },
-      {
-        id: 'notes' as ClientSection,
-        label: 'Notes',
-        hint:
-          selectedSnapshot.notesCount > 0
-            ? `${selectedSnapshot.notesCount} saved notes`
-            : 'Coach observations',
-        icon: StickyNote
-      },
-      {
-        id: 'nutrition' as ClientSection,
-        label: 'Nutrition',
-        hint: selectedSnapshot.nutritionCalories
-          ? `${selectedSnapshot.nutritionCalories} kcal target`
-          : 'Targets & food diary',
-        icon: Utensils
-      }
-    ];
-  }, [activeSelection, selectedSnapshot]);
 
   return (
     <div className="max-w-6xl mx-auto w-full min-w-0 space-y-6">
@@ -778,28 +714,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
                   {/* Direct Workspace Navigation (Single Action Per Section) */}
                   <div className="pt-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                      {workspaceSections.map((sec) => {
-                        const Icon = sec.icon;
-                        return (
-                          <button
-                            key={sec.id}
-                            type="button"
-                            aria-label={sec.label}
-                            onClick={() => onSelectClient(activeSelection.id, sec.id)}
-                            data-client-workspace-action={sec.id}
-                            className="min-h-[58px] min-w-0 px-3.5 py-2.5 rounded-xl border border-[#111827] bg-[#111827] text-white hover:bg-[#293241] hover:border-[#293241] active:bg-[#0B1220] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B45309] text-left flex items-center gap-3 transition-colors cursor-pointer"
-                          >
-                            <Icon className="w-4 h-4 text-[#FFC809] shrink-0" />
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-white truncate">
-                                {sec.label}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <ClientWorkspaceNavigation
+                      variant="tiles"
+                      onSelect={(section) => onSelectClient(activeSelection.id, section)}
+                    />
                   </div>
                 </div>
               )}
