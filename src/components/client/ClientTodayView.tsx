@@ -546,6 +546,7 @@ export const ClientTodayView: React.FC<ClientTodayViewProps> = ({ client, onUpda
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
+              aria-label="Session feedback"
               placeholder="Session feedback"
               rows={3}
               className="w-full text-base bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-[#111827] mb-4"

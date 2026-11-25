@@ -292,7 +292,7 @@ export const ExerciseEditorModal: React.FC<Props> = ({ exercise, saveAsCopy = fa
           <section className="space-y-4">
             <div>
               <label className={labelCls}>Exercise name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Exercise name" className={inputCls} />
+              <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Exercise name" placeholder="Exercise name" className={inputCls} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

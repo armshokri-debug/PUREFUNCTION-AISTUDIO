@@ -31,6 +31,7 @@ export const NotesPanel: React.FC<{ client: ClientProfile; onUpdateClient: (c: C
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={5}
+          aria-label="Coach note"
           placeholder="Coach note"
           className="w-full border border-gray-200 rounded-[20px] px-4 py-3 text-sm focus:outline-none focus:border-[#111827] resize-none"
         />
