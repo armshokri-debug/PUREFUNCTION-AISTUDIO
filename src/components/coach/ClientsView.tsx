@@ -787,11 +787,12 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                             type="button"
                             aria-label={sec.label}
                             onClick={() => onSelectClient(activeSelection.id, sec.id)}
-                            className="min-h-[58px] min-w-0 px-3.5 py-2.5 rounded-xl border border-gray-200/80 bg-[#F7F8FA]/60 hover:bg-[#F3F4F6] hover:border-gray-300 text-left flex items-center gap-3 transition-colors cursor-pointer"
+                            data-client-workspace-action={sec.id}
+                            className="min-h-[58px] min-w-0 px-3.5 py-2.5 rounded-xl border border-[#111827] bg-[#111827] text-white hover:bg-[#293241] hover:border-[#293241] active:bg-[#0B1220] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B45309] text-left flex items-center gap-3 transition-colors cursor-pointer"
                           >
-                            <Icon className="w-4 h-4 text-[#374151] shrink-0" />
+                            <Icon className="w-4 h-4 text-[#FFC809] shrink-0" />
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold text-[#111827] truncate">
+                              <div className="text-sm font-semibold text-white truncate">
                                 {sec.label}
                               </div>
                             </div>

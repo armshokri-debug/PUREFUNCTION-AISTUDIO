@@ -60,6 +60,8 @@ async function run(viewport) {
     await page.getByRole('button',{name:'Next week'}).click();
     const board = page.getByRole('region',{name:'Weekly workout overview'});
     await requireTrue('complete seven-day board appears',board.getByRole('article').count().then(n=>n===7));
+    await requireTrue('redundant edit links are removed',board.getByText('Edit day',{exact:true}).count().then(n=>n===0));
+    await requireTrue('every date retains a keyboard-accessible selector',board.locator('article button[aria-pressed]').count().then(n=>n===7));
     const tuesday=board.getByRole('article',{name:/^Tue, .* workout$/});
     const thursday=board.getByRole('article',{name:/^Thu, .* workout$/});
     const friday=board.getByRole('article',{name:/^Fri, .* workout$/});
