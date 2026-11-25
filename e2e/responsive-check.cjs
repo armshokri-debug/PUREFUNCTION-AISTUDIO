@@ -95,6 +95,47 @@ async function measure(p) {
       }
       await report('nav-' + nav);
     }
+    const sectionIds = ['exercises','assessment','progression','goals','notes','nutrition'];
+    const sectionNames = ['Exercises','Assessment','Progression','Goals','Notes','Nutrition'];
+    const tileIcons = {};
+    const rememberTiles = async (tiles) => {
+      const actual = await tiles.evaluateAll(nodes => nodes.map(el => ({
+        id: el.dataset.clientWorkspaceAction, icon: el.querySelector('svg')?.getAttribute('class')?.split(' ').find(c => c.startsWith('lucide-'))
+      })));
+      const ok = actual.map(x => x.id).join(',') === sectionIds.join(',') && actual.every(x => x.icon);
+      if (!ok) failures++;
+      actual.forEach(x => { tileIcons[x.id] = x.icon; });
+    };
+    const checkWorkspace = async (activeId) => {
+      const nav = p.getByRole('navigation', { name:'Client workspace sections' });
+      await nav.waitFor({state:'visible'});
+      // Inspect resting colors, not hover or an intermediate transition frame.
+      await p.mouse.move(0,0);
+      await p.waitForTimeout(250);
+      const state = await nav.evaluate((el, args) => {
+        const buttons = [...el.querySelectorAll('[data-client-section-tab]')];
+        const rows = new Set(buttons.map(b => Math.round(b.getBoundingClientRect().top))).size;
+        const bounds = el.getBoundingClientRect();
+        const colors = buttons.every(b => {
+          const current = b.dataset.clientSectionTab === args.activeId;
+          const icon = b.querySelector('svg');
+          const label = b.querySelector('div div');
+          const r = b.getBoundingClientRect();
+          return b.getAttribute('aria-current') === (current ? 'page' : null)
+            && getComputedStyle(b).backgroundColor === (current ? 'rgb(255, 200, 9)' : 'rgb(17, 24, 39)')
+            && !!icon && getComputedStyle(icon).color === (current ? 'rgb(17, 24, 39)' : 'rgb(255, 200, 9)')
+            && icon.getAttribute('class')?.split(' ').find(c => c.startsWith('lucide-')) === args.tileIcons[b.dataset.clientSectionTab]
+            && !!label && getComputedStyle(label).color === (current ? 'rgb(17, 24, 39)' : 'rgb(255, 255, 255)')
+            && label.scrollWidth <= label.clientWidth + 1
+            && r.height >= 44 && r.left >= bounds.left - 1 && r.right <= bounds.right + 1;
+        });
+        return { colors, rows, ids: buttons.map(b => b.dataset.clientSectionTab), panel: document.querySelector('[data-client-workspace-panel]')?.getAttribute('data-client-workspace-panel') };
+      }, {activeId, tileIcons});
+      const expectedRows = vp.width >= 1280 ? 1 : vp.width >= 640 ? 2 : 3;
+      const ok = state.colors && state.rows === expectedRows && state.ids.join(',') === sectionIds.join(',') && state.panel === activeId;
+      if (!ok) failures++;
+      console.log(`${ok ? 'ok' : 'XX'} [${vn}] shared workspace navigation ${activeId}: ${JSON.stringify(state)}`);
+    };
     // Desktop opens the workout workspace directly on roster click; verify the visible roster tiles before leaving.
     if (vp.width >= 768) {
       const tiles = p.locator('[data-client-workspace-action]:visible');
@@ -106,6 +147,10 @@ async function measure(p) {
       }));
       if (!tileStyleOK) failures++;
       console.log(`${tileStyleOK ? 'ok' : 'XX'} [${vn}] six charcoal client tiles, yellow icons, white labels`);
+      await rememberTiles(tiles);
+      await tiles.filter({hasText:'Assessment'}).click();
+      await checkWorkspace('assessment');
+      await p.getByRole('button',{name:'All clients',exact:true}).click();
     }
     // open first client
     const row = p.locator('main').getByText('Alex Carter', { exact: true });
@@ -121,9 +166,14 @@ async function measure(p) {
       }));
       if (!tileStyleOK) failures++;
       console.log(`${tileStyleOK ? 'ok' : 'XX'} [${vn}] six charcoal client tiles, yellow icons, white labels`);
+      await rememberTiles(tiles);
+      await tiles.filter({hasText:'Assessment'}).click();
+      await checkWorkspace('assessment');
     }
-    for (const tab of ['Exercises', 'Assessment', 'Notes', 'Goals', 'Progression', 'Nutrition']) {
-      if (!(await click(p.getByRole('tab', { name: tab })))) if (!(await click(p.getByRole('button', { name: new RegExp('^' + tab + '$') })))) { console.log(`?? [${vn}] no tab ${tab}`); unvisited++; continue; }
+    for (const [i, tab] of sectionNames.entries()) {
+      const nav = p.getByRole('navigation', {name:'Client workspace sections'});
+      if (!(await click(nav.getByRole('button', {name:tab,exact:true})))) { console.log(`?? [${vn}] no tab ${tab}`); unvisited++; continue; }
+      await checkWorkspace(sectionIds[i]);
       await report('tab-' + tab);
       const subs = { Exercises: ['Program', 'Exercise library', 'History'], Assessment: ['Overview', 'New assessment', 'Reports'] }[tab] || [];
       for (const s of subs) {
