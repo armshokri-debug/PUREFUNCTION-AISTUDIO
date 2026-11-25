@@ -229,7 +229,7 @@ export const ProgramTemplates: React.FC<{
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <label className="min-w-0 text-xs font-semibold text-gray-600">Template name
-          <input aria-label="Template name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Foundation phase" className="mt-1 block w-full min-h-[44px] border rounded-xl px-3 text-base" />
+          <input aria-label="Template name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" className="mt-1 block w-full min-h-[44px] border rounded-xl px-3 text-base" />
         </label>
         <label className="min-w-0 text-xs font-semibold text-gray-600">Length
           <select aria-label="Template length" value={scope} onChange={(e) => setScope(e.target.value as 'week' | 'program')} className="mt-1 block w-full min-h-[44px] border rounded-xl px-3 text-base"><option value="week">One week</option><option value="program">12 weeks</option></select>
@@ -311,7 +311,7 @@ export const ProgramTemplates: React.FC<{
                   Duplicate template
                 </h3>
                 <p className="text-xs text-gray-500 min-w-0 max-w-full [overflow-wrap:anywhere]">
-                  Create an independent copy of {duplicatingSource.name?.trim() || 'Untitled template'}.
+                  Source: {duplicatingSource.name?.trim() || 'Untitled template'}
                 </p>
               </div>
               <label className="block min-w-0 text-xs font-semibold text-gray-600">

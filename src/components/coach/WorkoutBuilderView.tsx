@@ -443,7 +443,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
           {!workout ? (
             <div className="py-10 text-center">
               <p className="text-base font-semibold text-[#111827] mb-1">Rest day</p>
-              <p className="text-sm text-gray-500 mb-5">Add exercises from the library, or start a workout.</p>
+              <p className="text-sm text-gray-500 mb-5">Add exercises or create a workout.</p>
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   onClick={() => saveWorkout(blankWorkout(selectedDate))}
@@ -477,20 +477,29 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                 aria-label="Workout title"
                 className="w-full text-xl sm:text-2xl font-bold text-[#111827] bg-transparent focus:outline-none border-b border-transparent focus:border-gray-200 pb-1 mb-1"
               />
-              <input
-                value={workout.focus}
-                onChange={(e) => patchWorkout({ focus: e.target.value })}
-                placeholder="Focus (e.g. Hips & sagittal strength)"
-                aria-label="Workout focus"
-                className="w-full text-sm text-gray-500 bg-transparent focus:outline-none mb-3"
-              />
-              <textarea
-                value={workout.coachNotes ?? ''}
-                onChange={(e) => patchWorkout({ coachNotes: e.target.value })}
-                placeholder="Notes for the client (warm-up, intent, reminders)…"
-                rows={2}
-                className="w-full text-base sm:text-sm bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 focus:outline-none focus:border-gray-300 mb-4"
-              />
+              <details key={selectedDate} className="mb-4 rounded-xl border border-gray-100 bg-gray-50 px-3">
+                <summary className="min-h-[44px] cursor-pointer py-3 text-xs font-semibold text-gray-600">
+                  Workout details
+                  {(workout.focus || workout.coachNotes) && <span className="ml-2 text-[#92400E]">· Added</span>}
+                </summary>
+                <div className="space-y-2 pb-3">
+                  <input
+                    value={workout.focus}
+                    onChange={(e) => patchWorkout({ focus: e.target.value })}
+                    placeholder="Focus"
+                    aria-label="Workout focus"
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-base sm:text-sm focus:outline-none focus:border-gray-400"
+                  />
+                  <textarea
+                    value={workout.coachNotes ?? ''}
+                    onChange={(e) => patchWorkout({ coachNotes: e.target.value })}
+                    placeholder="Client notes"
+                    aria-label="Client notes"
+                    rows={2}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-base sm:text-sm focus:outline-none focus:border-gray-400"
+                  />
+                </div>
+              </details>
 
               {/* Client's session feedback */}
               {(workout.sessionRpe || workout.clientFeedback) && (
@@ -512,6 +521,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                     <div
                       key={b.id}
                       data-editor-exercise={label}
+                      data-superset-linked={isPaired ? 'true' : undefined}
                       data-superset-member={inSuperset ? groupLabel : undefined}
                       className={`rounded-2xl border p-3.5 sm:p-4 ${b.pain ? 'border-[#FCA5A5] bg-[#FFF7F7]' : 'border-gray-200'} ${
                         inSuperset ? 'border-l-4 border-l-[#FFC809] bg-[#FFFDF5]/40' : ''
@@ -519,8 +529,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                     >
                       {startsSuperset && (
                         <div className="mb-3 rounded-lg bg-[#FFF4CF] px-3 py-2 text-xs font-semibold text-[#92400E]" role="note">
-                          Superset {groupLabel} · Alternate these exercises before resting
-                          <span className="block mt-0.5">{groupSize} exercises</span>
+                          Superset {groupLabel} · {groupSize} exercises
                         </div>
                       )}
                       <div className="flex items-start justify-between gap-2 mb-3">
@@ -530,8 +539,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                           </span>
                           <div className="min-w-0">
                             <div className="text-sm sm:text-base font-semibold text-[#111827] leading-snug">{b.name}</div>
-                            {inSuperset && <div className="text-[11px] text-[#92400E] font-semibold mt-0.5">{isPaired ? 'Paired with previous exercise' : 'Superset starts here'}</div>}
-                            {b.exerciseId.startsWith('manual:') && <div className="text-[11px] text-gray-500 mt-0.5">Custom workout exercise</div>}
+                            {b.exerciseId.startsWith('manual:') && <div className="text-[11px] text-gray-500 mt-0.5">Custom exercise</div>}
                             {last && (
                               <div className="text-[11px] text-gray-500 mt-0.5">
                                 Last ({formatDate(last.date)}): {formatPerformance(last)}
@@ -616,7 +624,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                       <input
                         value={b.notes}
                         onChange={(e) => patchBlock(b.id, { notes: e.target.value })}
-                        placeholder="Coaching note for this exercise"
+                        placeholder="Exercise note"
                         className="w-full text-base sm:text-xs text-gray-700 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 focus:outline-none focus:border-gray-300"
                       />
 
@@ -707,7 +715,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
               onChange={(e) => setSearch(e.target.value)}
               maxLength={120}
               aria-label="Search exercises or enter a custom exercise name"
-              placeholder="Search name or muscle (try “db press”, “rdl”)…"
+              placeholder="Search name or muscle"
               className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-base sm:text-sm text-[#111827] focus:outline-none focus:bg-white focus:border-[#111827]"
             />
           </div>
@@ -737,7 +745,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
                 <span className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
                   <Plus className="w-4 h-4 text-[#92400E]" /> Add “{customName}” as a custom exercise
                 </span>
-                <span className="mt-1 block text-xs text-gray-600">Saved in this workout only — no library entry required.</span>
+                <span className="mt-1 block text-xs text-gray-600">Workout only</span>
               </button>
             )}
           <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 -mr-1">
@@ -780,7 +788,7 @@ export const WorkoutBuilderView: React.FC<WorkoutBuilderViewProps> = ({
             ))}
             {results.length > LIST_LIMIT && (
               <p className="text-[11px] text-gray-400 text-center py-2">
-                Showing {LIST_LIMIT} of {results.length.toLocaleString()} — search to narrow down
+                Showing {LIST_LIMIT} of {results.length.toLocaleString()} 
               </p>
             )}
             {results.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No matches</p>}

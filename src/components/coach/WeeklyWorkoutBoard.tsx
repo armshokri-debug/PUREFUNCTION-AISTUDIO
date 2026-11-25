@@ -58,9 +58,6 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div>
           <h2 className="text-sm font-bold text-[#111827]">Weekly workout calendar</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Seven days · exercises, sets and reps · drag to move or use Copy / Move
-          </p>
         </div>
         {clipboard && (
           <div role="status" className="flex flex-wrap items-center gap-2 text-xs font-semibold rounded-xl bg-[#FFF4CF] px-3 py-2 text-[#92400E]">
@@ -72,7 +69,7 @@ export const WeeklyWorkoutBoard: React.FC<WeeklyWorkoutBoardProps> = ({
           </div>
         )}
       </div>
-      <p className="text-[11px] text-gray-500 mb-2 xl:hidden">Swipe sideways to see all seven days.</p>
+      <p className="text-[11px] text-gray-500 mb-2 xl:hidden">Swipe for more days.</p>
       <div role="region" tabIndex={0} aria-label="Scroll the full seven-day workout calendar"
         className="overflow-x-auto overscroll-x-contain pb-3 rounded-2xl">
         <div className="grid grid-cols-7 gap-2 min-w-[1120px] xl:min-w-0 items-stretch">

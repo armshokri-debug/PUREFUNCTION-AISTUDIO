@@ -85,7 +85,7 @@ export const Thread: React.FC<{
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-4 space-y-2 bg-[#F7F8FA]">
         {error && <p className="text-sm text-gray-500 text-center py-10">{error}</p>}
-        {!error && !thread.length && <p className="text-sm text-gray-500 text-center py-10">No messages yet. Say hi 👋</p>}
+        {!error && !thread.length && <p className="text-sm text-gray-500 text-center py-10">No messages yet.</p>}
         {thread.map((m) => {
           const mine = m.fromCoach === (me === 'coach');
           return (
@@ -203,7 +203,7 @@ export const CoachMessages: React.FC<{ clients: ClientProfile[]; initialClientId
               data={data}
             />
           ) : (
-            <p className="text-sm text-gray-500">Pick a client to start chatting.</p>
+            <p className="text-sm text-gray-500">Select a client.</p>
           )}
         </div>
       </div>

@@ -50,7 +50,6 @@ export const NutritionPanel: React.FC<{ client: ClientProfile; onUpdateClient: (
             </label>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-3">{client.name.split(' ')[0]} sees protein and water on the Today screen and can log them each day.</p>
       </section>
 
       <section className={card}>
@@ -88,7 +87,7 @@ export const NutritionPanel: React.FC<{ client: ClientProfile; onUpdateClient: (
               value={plan.mealPlan ?? ''}
               onChange={(e) => set({ mealPlan: e.target.value })}
               rows={6}
-              placeholder={'Breakfast: Greek yogurt + oats + berries\nLunch: chicken, rice, vegetables\nPost-workout: protein shake\nDinner: fish, potatoes, salad'}
+              placeholder="Meal plan"
               className="mt-2 w-full border border-gray-200 rounded-[20px] px-4 py-3 text-sm focus:outline-none focus:border-[#111827] resize-none"
             />
           </label>
@@ -98,7 +97,7 @@ export const NutritionPanel: React.FC<{ client: ClientProfile; onUpdateClient: (
               value={plan.coachNote ?? ''}
               onChange={(e) => set({ coachNote: e.target.value })}
               rows={6}
-              placeholder="e.g. Add 20 g protein on training days."
+              placeholder="Coach note"
               className="mt-2 w-full border border-gray-200 rounded-[20px] px-4 py-3 text-sm focus:outline-none focus:border-[#111827] resize-none"
             />
           </label>

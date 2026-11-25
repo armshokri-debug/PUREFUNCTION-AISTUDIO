@@ -226,7 +226,7 @@ export const ProgramTemplateEditor: React.FC<{
             setHideServerError(true);
             setDraft((prev) => ({ ...prev, name: e.target.value }));
           }}
-          placeholder="e.g. Foundation phase"
+          placeholder="Template name"
           className={fieldCls}
         />
       </label>
@@ -369,7 +369,7 @@ export const ProgramTemplateEditor: React.FC<{
                               value={block.notes ?? ''}
                               disabled={saving}
                               onChange={(e) => updateBlock(dayIdx, blockIdx, { notes: e.target.value })}
-                              placeholder="Coaching note for this exercise"
+                              placeholder="Exercise note"
                               className="mt-1 block w-full min-w-0 min-h-[44px] bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-base text-gray-700 focus:outline-none focus:border-[#111827] disabled:opacity-60"
                             />
                           </label>

@@ -442,7 +442,7 @@ export const ExerciseLibraryView: React.FC<ExerciseLibraryViewProps> = ({
             {!catalogLoaded
               ? 'Loading exercises…'
               : scope === 'favorites' && !anyFilterBesidesScope(searchQuery, group, selectedEquipment, selectedPlane, selectedPattern)
-              ? 'No favorites yet. Tap the star on an exercise to keep it here.'
+              ? 'No favorites yet.'
               : 'No exercises match.'}
           </p>
           {suggestion && (

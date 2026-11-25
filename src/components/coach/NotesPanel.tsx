@@ -31,7 +31,7 @@ export const NotesPanel: React.FC<{ client: ClientProfile; onUpdateClient: (c: C
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={5}
-          placeholder="e.g. Left knee tight on split squats — shorten range this week."
+          placeholder="Coach note"
           className="w-full border border-gray-200 rounded-[20px] px-4 py-3 text-sm focus:outline-none focus:border-[#111827] resize-none"
         />
         <label className="flex items-center gap-2 mt-3 text-sm text-gray-600 cursor-pointer select-none">
@@ -42,7 +42,7 @@ export const NotesPanel: React.FC<{ client: ClientProfile; onUpdateClient: (c: C
           Save note
         </button>
         <p className="text-xs text-gray-400 mt-3 flex items-center gap-1.5">
-          <Lock className="w-3.5 h-3.5" /> Notes are private unless you share them.
+          <Lock className="w-3.5 h-3.5" /> Private unless shared.
         </p>
         </fieldset>
       </section>

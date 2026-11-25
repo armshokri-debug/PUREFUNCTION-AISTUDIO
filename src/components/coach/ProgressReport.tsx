@@ -253,13 +253,13 @@ export const ProgressReport: React.FC<{
                 value={notes['report:summary'] ?? ''}
                 onChange={(e) => setNote('report:summary', e.target.value)}
                 rows={4}
-                placeholder="What changed, what it means, how the client did…"
+                placeholder="Progress summary"
                 className="no-print w-full border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-sm focus:outline-none focus:border-[#111827] mb-2"
               />
               <input
                 value={notes['report:next'] ?? ''}
                 onChange={(e) => setNote('report:next', e.target.value)}
-                placeholder="Next phase focus (e.g. load the left side, add single-leg work)"
+                placeholder="Next phase focus"
                 className="no-print w-full border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-sm focus:outline-none focus:border-[#111827]"
               />
             </>
