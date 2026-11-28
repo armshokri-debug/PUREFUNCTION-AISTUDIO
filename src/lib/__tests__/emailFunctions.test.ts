@@ -429,6 +429,27 @@ describe('Route 2: sign-up (registration & email verification)', () => {
 });
 
 describe('Route 3: reset-password (password recovery)', () => {
+  it('distinguishes successive recovery emails in both subject and visible body without exposing tokens in subject', async () => {
+    let clock = Date.parse('2026-11-28T11:43:00Z');
+    const sendEmail = vi.fn<SendEmailFn>(async () => ({ ok: true }));
+    const deps = { appUrl: APP_URL, generateRecoveryLink: async () => ({ hashedToken: 'test-secret-token' }), sendEmail, now: () => clock, logInfo: vi.fn() };
+    const request = () => postJson('https://fn.local/reset-password', { email: 'member@example.invalid' });
+    expect((await handleResetPassword(request(), deps)).status).toBe(200);
+    clock += 60_000;
+    expect((await handleResetPassword(request(), deps)).status).toBe(200);
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    const first = sendEmail.mock.calls[0];
+    const second = sendEmail.mock.calls[1];
+    expect(first[1]).toContain('2026-11-28T11:43:00.000Z');
+    expect(second[1]).toContain('2026-11-28T11:44:00.000Z');
+    expect(first[1]).not.toBe(second[1]);
+    expect(second[1]).not.toContain('test-secret-token');
+    expect(second[1]).not.toContain('member@example.invalid');
+    expect(first[2]).toContain('2026-11-28T11:43:00.000Z');
+    expect(second[2]).toContain('2026-11-28T11:44:00.000Z');
+    expect(second[2]).toContain(APP_URL + '?reset=test-secret-token');
+  });
+
   it.each([
     ['https://purefunction-live.pages.dev/', 'https://armshokri-debug.github.io', 'https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/'],
     ['https://purefunction-live.pages.dev/', 'https://purefunction-live.pages.dev', 'https://purefunction-live.pages.dev/'],
