@@ -31,7 +31,7 @@ async function listBucketPrefix(
   prefix: string,
   depth = 0
 ): Promise<{ paths: string[]; error: unknown }> {
-  if (depth > 5) return { paths: [], error: null };
+  if (depth > 5) return { paths: [], error: new Error('Storage traversal depth exceeded') };
   const collected: string[] = [];
   const pageSize = 100;
   let offset = 0;
@@ -115,6 +115,15 @@ Deno.serve(async (req) => {
       return { data: (data ?? []) as Array<{ id: string; role: string | null }>, error };
     },
     listClientStoragePaths: (bucket, clientId) => listBucketPrefix(admin, bucket, clientId),
+    acquireDeletionLease: async (clientId, coachId, leaseId) => {
+      const { data, error } = await admin.rpc('pf_deletion_lease_acquire', {
+        p_client_id: clientId, p_coach_id: coachId, p_lease_id: leaseId
+      });
+      return { outcome: data as 'acquired' | 'busy' | 'forbidden' | null, error };
+    },
+    releaseDeletionLease: async (clientId, leaseId) => {
+      return admin.rpc('pf_deletion_lease_release', { p_client_id: clientId, p_lease_id: leaseId });
+    },
     getDeletionJob: async (clientId) => {
       const { data, error } = await admin.rpc('pf_deletion_job_get', { p_client_id: clientId });
       return { data: (data as ClientDeletionJob | null) ?? null, error };
@@ -148,14 +157,11 @@ Deno.serve(async (req) => {
       }
       return { error };
     },
-    deleteOwnedClientRow: async (token, clientId) => {
-      const caller = callerClient(token);
-      const { data, error } = await caller
-        .from('clients')
-        .delete()
-        .eq('id', clientId)
-        .select('id');
-      return { deleted: !error && Array.isArray(data) && data.length === 1, error };
+    deleteOwnedClientRow: async (_token, clientId, coachId, leaseId) => {
+      const { data, error } = await admin.rpc('pf_delete_client_row_with_lease', {
+        p_client_id: clientId, p_coach_id: coachId, p_lease_id: leaseId
+      });
+      return { deleted: !error && data === true, error };
     },
     deleteAuthUser: async (uid) => {
       const { error } = await admin.auth.admin.deleteUser(uid);

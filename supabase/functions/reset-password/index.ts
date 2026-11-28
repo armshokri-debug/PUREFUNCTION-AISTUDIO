@@ -15,6 +15,10 @@ Deno.serve(async (req) => {
   return handleResetPassword(req, {
     appUrl: APP_URL,
     cooldown: resetCooldown,
+    reserveAttempt: async (subject) => {
+      const { data, error } = await admin.rpc('pf_reserve_api_budget', { p_scope: 'password_reset', p_subject: subject });
+      return !error && data === true;
+    },
     sendEmail: sendTransactionalEmail,
     generateRecoveryLink: async (email) => {
       const { data, error } = await admin.auth.admin.generateLink({ type: 'recovery', email });

@@ -11,15 +11,21 @@ Deno.serve(async req => {
  const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i,'');
  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false}});
  const who = await admin.auth.getUser(jwt);
- if(!who.data.user) return json(401,{error:'Sign in required'});
+ if(!who.data.user || !who.data.user.email_confirmed_at) return json(401,{error:'Sign in required'});
+ const profile=await admin.from('profiles').select('role').eq('id',who.data.user.id).maybeSingle();
+ if(profile.error) return json(503,{error:'Analysis unavailable. Enter foods manually.'});
+ if(!profile.data || !['coach','client'].includes(profile.data.role)) return json(403,{error:'Access denied'});
  const {description} = await req.json().catch(()=>({}));
  if(!valid(description)) return json(400,{error:'Describe your food (max 2000 characters)'});
  const aiKey = Deno.env.get('OPENAI_API_KEY');
  const usdaKey = Deno.env.get('USDA_API_KEY');
  if(!aiKey || !usdaKey) return json(503,{error:'Analysis unavailable. Enter foods manually.'});
  try {
+  const budget = await admin.rpc('pf_reserve_api_budget',{p_scope:'food_parse',p_subject:who.data.user.id});
+  if(budget.error) return json(503,{error:'Analysis unavailable. Enter foods manually.'});
+  if(budget.data!==true) return json(429,{error:'Analysis limit reached. Enter foods manually or try later.'});
   const response = await fetch('https://api.openai.com/v1/chat/completions',{
-   method:'POST',headers:{Authorization:`Bearer ${aiKey}`,'Content-Type':'application/json'},
+   method:'POST',signal:AbortSignal.timeout(20000),headers:{Authorization:`Bearer ${aiKey}`,'Content-Type':'application/json'},
    body:JSON.stringify({model:Deno.env.get('OPENAI_FOOD_MODEL') || 'gpt-6-luna',reasoning_effort:'none',response_format:{type:'json_object'},messages:[
     {role:'system',content:'Identify individual foods and portions. Return JSON {foods:[{name:string,quantity:number,unit:"g"|"oz"|"cup"|"tbsp"|"piece"|"serving",grams:number|null,state:"raw"|"cooked"|"unknown",assumptions:string}],questions:string[]}. No nutritional values. Only ask material ambiguities (oil, butter, sauces, milk, cooking method, raw/cooked, eaten portion, missing serving size). For mixed dishes like ghormeh sabzi, kebab plates, soups or restaurant meals, request a recipe, restaurant name or portion explanation when needed. Never invent confidence percentages.'},
     {role:'user',content:String(description)}]})
@@ -34,7 +40,7 @@ Deno.serve(async req => {
    const name = String(f.name ?? '').slice(0,180);
    if(!name) continue;
    const query = await fetch('https://api.nal.usda.gov/fdc/v1/foods/search?api_key='+encodeURIComponent(usdaKey),{
-    method:'POST',headers:{'Content-Type':'application/json'},
+    method:'POST',signal:AbortSignal.timeout(5000),headers:{'Content-Type':'application/json'},
     body:JSON.stringify({query:name,pageSize:6,dataType:['Foundation','SR Legacy','Survey (FNDDS)']})
    });
    const match = query.ok ? (await query.json()).foods?.[0] : null;

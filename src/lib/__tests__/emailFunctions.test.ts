@@ -646,3 +646,33 @@ describe('Route 4: daily-reminders (cron auth, timezone, dedup, pause gate)', ()
     expect(sendEmail.mock.calls[1][3]).toEqual({ idempotencyKey: 'daily-reminder:2026-11-20:c2' });
   });
 });
+
+describe('Durable API budget fail-closed behavior', () => {
+  it('does not generate or send a recovery link when the shared budget denies it', async () => {
+    const generateRecoveryLink=vi.fn(async()=>({hashedToken:'never-used'}));
+    const sendEmail=vi.fn<SendEmailFn>(async()=>({ok:true}));
+    const reserveAttempt=vi.fn(async()=>false);
+    const res=await handleResetPassword(postJson('https://fn.local/reset-password',{email:'athlete@googlemail.com'}),{
+      appUrl:APP_URL,generateRecoveryLink,sendEmail,reserveAttempt
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ok:true});
+    expect(reserveAttempt).toHaveBeenCalledWith('athlete@gmail.com');
+    expect(generateRecoveryLink).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+  it('does not look up or create an account when the shared signup budget denies it',async()=>{
+    const isExistingSignupAccount=vi.fn(async()=>({data:false,error:null}));
+    const generateSignupLink=vi.fn(async()=>({hashedToken:'never-used'}));
+    const sendEmail=vi.fn<SendEmailFn>(async()=>({ok:true}));
+    const res=await handleSignUp(postJson('https://fn.local/sign-up',{email:'athlete@example.invalid',password:'synthetic123'}),{
+      appUrl:APP_URL,reserveAttempt:async()=>false,
+      reserveSignupVerification:async()=>({data:true,error:null}),getSignupRole:async()=>({data:'client',error:null}),
+      isExistingSignupAccount,generateMagicLink:async()=>({}),generateSignupLink,deleteUser:async()=>{},sendEmail
+    });
+    expect(res.status).toBe(200);
+    expect(isExistingSignupAccount).not.toHaveBeenCalled();
+    expect(generateSignupLink).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+});

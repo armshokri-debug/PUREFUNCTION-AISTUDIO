@@ -81,6 +81,8 @@ function createSyntheticHarness(overrides: Partial<DeleteClientDeps> = {}) {
       paths: [...(state.storage.get(bucket) ?? [])].filter((p) => p.startsWith(`${clientId}/`)),
       error: null
     })),
+    acquireDeletionLease: vi.fn(async () => ({ outcome: 'acquired' as const, error: null })),
+    releaseDeletionLease: vi.fn(async () => ({})),
     getDeletionJob: vi.fn(async (clientId) => ({
       data: state.jobs.get(clientId) ? structuredClone(state.jobs.get(clientId)!) : null,
       error: null
@@ -143,6 +145,40 @@ function createSyntheticHarness(overrides: Partial<DeleteClientDeps> = {}) {
 }
 
 describe('Staged, trackable, idempotent handleDeleteClient', () => {
+  it('fails closed while another request holds the deletion lease', async () => {
+    const { deps, state } = createSyntheticHarness({
+      acquireDeletionLease: vi.fn(async () => ({ outcome: 'busy' as const, error: null }))
+    });
+    const res = await handleDeleteClient(postDelete({ clientId: 'client-1', confirm: true, confirmName: 'Alex Morgan' }, 'coach-jwt'), deps);
+    expect(res.status).toBe(409);
+    expect(state.clientExists).toBe(true);
+    expect(deps.deleteAuthUser).not.toHaveBeenCalled();
+    expect(deps.releaseDeletionLease).not.toHaveBeenCalled();
+  });
+
+  it('releases its lease on an interrupted deletion and never reports success', async () => {
+    const { deps } = createSyntheticHarness({
+      getDeletionJob: vi.fn(async () => ({ data: null, error: { message: 'unavailable' } }))
+    });
+    const res = await handleDeleteClient(postDelete({ clientId: 'client-1', confirm: true, confirmName: 'Alex Morgan' }, 'coach-jwt'), deps);
+    expect(res.status).toBe(503);
+    expect(deps.releaseDeletionLease).toHaveBeenCalledTimes(1);
+    expect(deps.deleteOwnedClientRow).not.toHaveBeenCalled();
+  });
+
+  it('removes media added after the initial inventory', async () => {
+    const { deps, state } = createSyntheticHarness();
+    const base = deps.deleteOwnedClientRow;
+    deps.deleteOwnedClientRow = vi.fn(async (token, id, coachId, leaseId) => {
+      const result = await base(token, id, coachId, leaseId);
+      state.storage.get('client-videos')!.add('client-1/late.mp4');
+      return result;
+    });
+    const res = await handleDeleteClient(postDelete({ clientId: 'client-1', confirm: true, confirmName: 'Alex Morgan' }, 'coach-jwt'), deps);
+    expect(res.status).toBe(200);
+    expect(state.storage.get('client-videos')!.size).toBe(0);
+  });
+
   it('deletes in strict safe order: reversible Auth lock -> DB delete -> Auth delete -> Storage cleanup', async () => {
     const { deps, state } = createSyntheticHarness();
     const res = await handleDeleteClient(
@@ -180,16 +216,16 @@ describe('Staged, trackable, idempotent handleDeleteClient', () => {
     expect(state.storage.get('client-videos')?.size).toBe(0);
     expect(state.storage.get('inbody-printouts')?.size).toBe(0);
     expect(state.jobs.get('client-1')?.status).toBe('completed');
-    expect(deps.listClientStoragePaths).toHaveBeenCalledTimes(CLIENT_STORAGE_BUCKETS.length);
+    expect(deps.listClientStoragePaths).toHaveBeenCalledTimes(CLIENT_STORAGE_BUCKETS.length * 2);
   });
 
   it('rolls back Auth lock and NEVER deletes Auth or Storage if DB deletion fails, then succeeds on retry', async () => {
     let failDb = true;
     const { deps, state } = createSyntheticHarness();
     const baseDeleteRow = deps.deleteOwnedClientRow;
-    deps.deleteOwnedClientRow = vi.fn(async (token, id) => {
+    deps.deleteOwnedClientRow = vi.fn(async (token, id, coachId, leaseId) => {
       if (failDb) return { deleted: false, error: { message: 'db timeout' } };
-      return baseDeleteRow(token, id);
+      return baseDeleteRow(token, id, coachId, leaseId);
     });
 
     // Attempt 1: DB fails -> Auth MUST NOT be deleted and MUST be unlocked back to active.

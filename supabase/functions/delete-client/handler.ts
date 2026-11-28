@@ -49,6 +49,8 @@ export interface DeleteClientDeps {
     bucket: ClientStorageBucket,
     clientId: string
   ) => Promise<{ paths: string[]; error: unknown }>;
+  acquireDeletionLease: (clientId: string, coachId: string, leaseId: string) => Promise<{ outcome: 'acquired' | 'busy' | 'forbidden' | null; error: unknown }>;
+  releaseDeletionLease: (clientId: string, leaseId: string) => Promise<unknown>;
   getDeletionJob: (clientId: string) => Promise<{ data: ClientDeletionJob | null; error: unknown }>;
   createDeletionJob: (input: {
     clientId: string;
@@ -70,7 +72,9 @@ export interface DeleteClientDeps {
   setAuthUserBanned: (uid: string, banned: boolean) => Promise<{ error: unknown }>;
   deleteOwnedClientRow: (
     token: string,
-    clientId: string
+    clientId: string,
+    coachId: string,
+    leaseId: string
   ) => Promise<{ deleted: boolean; error: unknown }>;
   /** Permanent Auth deletion — invoked ONLY after the client DB row is deleted. */
   deleteAuthUser: (uid: string) => Promise<{ error: unknown }>;
@@ -146,6 +150,30 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
     return json(400, { error: 'Explicit coach confirmation is required before deleting a client.' });
   }
 
+  const leaseId = crypto.randomUUID();
+  const lease = await deps.acquireDeletionLease(clientId, uid, leaseId);
+  if (lease.error || !lease.outcome) {
+    return json(503, { error: 'Safe deletion tracking is unavailable. No data was deleted.', retryable: true });
+  }
+  if (lease.outcome === 'forbidden') {
+    return json(403, { error: 'Only the owning coach may delete this client.' });
+  }
+  if (lease.outcome !== 'acquired') {
+    return json(409, { error: 'A deletion is already in progress. Retry after it finishes.', retryable: true });
+  }
+
+  try {
+    return await runDeletion(clientId, uid, token, body.confirmName, deps, leaseId);
+  } finally {
+    // A lost release response must not turn a confirmed deletion into a failure.
+    // The database lease expires if the worker is interrupted.
+    await deps.releaseDeletionLease(clientId, leaseId).catch(() => {});
+  }
+}
+
+async function runDeletion(
+  clientId: string, uid: string, token: string, confirmName: unknown, deps: DeleteClientDeps, leaseId: string
+): Promise<Response> {
   // Check durable deletion tracking first (fail closed if tracking store is unavailable).
   const existingJobRes = await deps.getDeletionJob(clientId);
   if (existingJobRes.error) {
@@ -162,7 +190,7 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
     if (job.coachId !== uid) {
       return json(403, { error: 'Only the owning coach may delete this client.' });
     }
-    if (!job.isTestClient && !confirmNameMatches(job.clientName, body.confirmName)) {
+    if (!job.isTestClient && !confirmNameMatches(job.clientName, confirmName)) {
       return json(400, { error: 'Type the client’s full name to confirm permanent deletion.' });
     }
     if (job.status === 'completed') {
@@ -197,7 +225,7 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
 
     const isTestClient = Boolean(client.data?.isTestClient);
     const storedName = String(client.data?.name ?? '').trim();
-    if (!isTestClient && !confirmNameMatches(storedName, body.confirmName)) {
+    if (!isTestClient && !confirmNameMatches(storedName, confirmName)) {
       return json(400, { error: 'Type the client’s full name to confirm permanent deletion.' });
     }
 
@@ -251,6 +279,9 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
     if (job.coachId !== uid) {
       return json(403, { error: 'Only the owning coach may delete this client.' });
     }
+    if (!job.isTestClient && !confirmNameMatches(job.clientName, confirmName)) {
+      return json(400, { error: 'Type the client’s full name to confirm permanent deletion.' });
+    }
   }
 
   // Stage 1: Reversible Auth lockout (prevents concurrent client writes without destroying Auth yet).
@@ -296,7 +327,7 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
   // Stage 2: Atomic DB cascade delete via caller's JWT (RLS-enforced).
   // Auth is NOT permanently deleted yet; if DB deletion fails, Auth lock is reversed.
   if (job.status === 'auth_disabled') {
-    const deletedRow = await deps.deleteOwnedClientRow(token, job.clientId);
+    const deletedRow = await deps.deleteOwnedClientRow(token, job.clientId, uid, leaseId);
     let dbGone = !deletedRow.error && deletedRow.deleted;
 
     if (!dbGone) {
@@ -374,7 +405,23 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
 
   // Stage 4: Idempotent storage media cleanup.
   if (job.status === 'auth_deleted') {
+    // Re-list after Auth and DB deletion: catch files added since the initial snapshot.
+    // Never report success when inventory cannot be verified.
+    const cleanup = new Map<ClientStorageBucket, Set<string>>();
     for (const entry of job.storageManifest) {
+      cleanup.set(entry.bucket, new Set(entry.paths));
+    }
+    for (const bucket of CLIENT_STORAGE_BUCKETS) {
+      const listed = await deps.listClientStoragePaths(bucket, job.clientId);
+      if (listed.error) {
+        return json(503, { error: 'Could not verify remaining client media. Retry cleanup.', stage: 'storage_cleanup', retryable: true });
+      }
+      const paths = cleanup.get(bucket) ?? new Set<string>();
+      for (const path of listed.paths) paths.add(path);
+      cleanup.set(bucket, paths);
+    }
+    for (const [bucket, paths] of cleanup) {
+      const entry = { bucket, paths: [...paths] };
       if (entry.paths.length === 0) continue;
       const removed = await deps.removeStoragePaths(entry.bucket, entry.paths);
       if (removed.error) {
@@ -404,6 +451,9 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
     job = completed.data;
   }
 
+  if (job.status !== 'completed') {
+    return json(503, { error: 'Deletion completion could not be verified. Retry safely.', retryable: true });
+  }
   return json(200, {
     ok: true,
     status: 'completed',

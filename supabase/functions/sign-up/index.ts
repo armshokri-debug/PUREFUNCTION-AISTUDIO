@@ -13,6 +13,10 @@ Deno.serve(async (req) => {
 
   return handleSignUp(req, {
     appUrl: APP_URL,
+    reserveAttempt: async (subject) => {
+      const { data, error } = await admin.rpc('pf_reserve_api_budget', { p_scope: 'signup', p_subject: subject });
+      return !error && data === true;
+    },
     sendEmail: sendTransactionalEmail,
     reserveSignupVerification: (email) => admin.rpc('reserve_signup_verification', { p_email: email }),
     getSignupRole: (email) => admin.rpc('signup_role', { p_email: email }),
