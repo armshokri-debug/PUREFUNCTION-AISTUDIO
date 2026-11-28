@@ -19,8 +19,8 @@ const CLOUDFLARE_APP = 'https://purefunction-live.pages.dev/';
 // Origin, Referer or request-body URL into a recovery link. Preserve QA and
 // other explicitly configured deployments.
 function recoveryAppUrl(configured: string, origin: string | null): string {
-  const base = configured.replace(/\\/+$/, '');
-  if (base !== GITHUB_APP.replace(/\\/+$/, '') && base !== CLOUDFLARE_APP.replace(/\\/+$/, '')) return configured;
+  const base = configured.endsWith('/') ? configured : configured + '/';
+  if (base !== GITHUB_APP && base !== CLOUDFLARE_APP) return configured;
   if (origin === 'https://armshokri-debug.github.io') return GITHUB_APP;
   if (origin === 'https://purefunction-live.pages.dev') return CLOUDFLARE_APP;
   return configured;
