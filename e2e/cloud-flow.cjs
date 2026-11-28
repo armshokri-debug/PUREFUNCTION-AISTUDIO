@@ -167,6 +167,20 @@ const today = iso(new Date());
   await C.waitForTimeout(1000);
   ok(mock.db.workouts.find(x => x.id === w.id)?.data.blocks[0].reps === '8-10', 'repetition range persists');
 
+  // Offline edits must remain local until reconnection, then persist without reload.
+  await C.context().setOffline(true);
+  await setsField.fill('5');
+  await setsField.blur();
+  await C.waitForTimeout(1200);
+  ok(mock.db.workouts.find(x => x.id === w.id)?.data.blocks[0].sets === 4, 'offline edit does not attempt a cloud save');
+  ok(await C.getByText('Offline — will save', { exact: true }).first().isVisible(), 'offline save status is explicit');
+  await C.context().setOffline(false);
+  await C.waitForFunction(() => !!Array.from(document.querySelectorAll('[role=status]')).find(e=>e.textContent.trim()==='Saved'), null, {timeout:10000});
+  ok(mock.db.workouts.find(x => x.id === w.id)?.data.blocks[0].sets === 5, 'reconnected edit persists without refresh');
+  await setsField.fill('4');
+  await setsField.blur();
+  await C.waitForTimeout(1200);
+
   // Regression: returning to the client's program preserves the selected week.
   await C.getByRole('button', { name: 'Next week', exact: true }).click();
   await C.getByRole('button', { name: 'All clients' }).click();
