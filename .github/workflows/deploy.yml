@@ -7,6 +7,11 @@ on:
         description: 'Full main commit SHA reviewed for release'
         required: true
         type: string
+      enable_safe_client_delete:
+        description: 'Enable permanent client deletion only after server and recovery acceptance'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,6 +58,7 @@ jobs:
           # access is enforced by Row Level Security in the database.
           VITE_SUPABASE_URL: https://rugwzvztweiffprkxfdc.supabase.co
           VITE_SUPABASE_ANON_KEY: sb_publishable_Z0naU2LSCJJNEUFWqkoyHg_0AJo4yiw
+          VITE_ENABLE_SAFE_CLIENT_DELETE: ${{ inputs.enable_safe_client_delete && 'true' || 'false' }}
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
         with:
