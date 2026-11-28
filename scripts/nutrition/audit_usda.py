@@ -41,15 +41,20 @@ def download(suffix, key):
     foods = data[key]
     if not isinstance(foods, list) or not foods:
         raise ValueError("Empty USDA source")
-    by_id = {str(f["fdcId"]): f for f in foods}
-    if len(by_id) != len(foods):
+    null_records = sum(f is None for f in foods)
+    if any(f is not None and (not isinstance(f, dict) or not f.get("fdcId")) for f in foods):
+        raise ValueError("Malformed official record")
+    by_id = {str(f["fdcId"]): f for f in foods if f is not None}
+    if len(by_id) != len(foods) - null_records:
         raise ValueError("Duplicate official FDC ID")
-    return by_id, {"url": url, "sha256": hashlib.sha256(blob).hexdigest(), "foods": len(foods)}
+    return by_id, {"url": url, "sha256": hashlib.sha256(blob).hexdigest(), "foods": len(by_id), "null_records": null_records}
 
 def nutrients(food):
     result = {}
-    for n in food.get("foodNutrients", []):
-        nutrient_id = n.get("nutrient", {}).get("id", n.get("nutrientId"))
+    for n in food.get("foodNutrients") or []:
+        if not isinstance(n, dict):
+            continue
+        nutrient_id = (n.get("nutrient") or {}).get("id", n.get("nutrientId"))
         amount = n.get("amount")
         if isinstance(amount, (int, float)) and math.isfinite(amount) and amount >= 0:
             result.setdefault(nutrient_id, set()).add(amount)
@@ -89,7 +94,7 @@ def main():
                 report["mismatches"].append({"fdc_id":row[2],"description_match":description_match,"bundled":row[5:9],"official":official})
             else:
                 report["verified_foods"] += 1
-            weights = [p.get("gramWeight") for p in food.get("foodPortions",[]) if isinstance(p.get("gramWeight"),(int,float))]
+            weights = [p.get("gramWeight") for p in food.get("foodPortions") or [] if isinstance(p,dict) and isinstance(p.get("gramWeight"),(int,float))]
             for label, grams in row[9]:
                 if any(close(grams,w) for w in weights):
                     report["portion_weight_matches"] += 1
@@ -99,7 +104,7 @@ def main():
             if id in existing_ids:
                 continue
             values=macros(food)
-            description=food.get("description","").strip()
+            description=(food.get("description") or "").strip()
             if not description or len(description)>200 or any(v is None for v in values):
                 continue
             if values[0]>1000 or any(v>100 for v in values[1:]) or sum(values[1:])>105:
