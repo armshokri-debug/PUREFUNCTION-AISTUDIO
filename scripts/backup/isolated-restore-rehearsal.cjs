@@ -24,12 +24,13 @@ assert.equal(process.env.PF_ISOLATED_RESTORE, 'I_CONFIRM_DISPOSABLE_LOCAL_ONLY',
 const db = process.env.PF_RESTORE_DB_URL;
 const api = process.env.PF_RESTORE_API_URL;
 const localServiceKey = process.env.PF_RESTORE_LOCAL_SERVICE_KEY;
+const localAnonKey = process.env.PF_RESTORE_LOCAL_ANON_KEY;
 for(const url of [db,api]) {
   assert(url, 'Missing local Supabase endpoint');
   const u = new URL(url);
   assert(['localhost','127.0.0.1'].includes(u.hostname), 'Blocked: remote endpoint');
 }
-assert(localServiceKey,'Missing disposable-local service key');
+assert(localServiceKey && localAnonKey,'Missing disposable-local API keys');
 const folderId=process.env.BACKUP_GDRIVE_FOLDER_ID;
 assert(/^[\w-]{10,120}$/.test(folderId||''),'Missing pinned backup folder');
 process.umask(0o077);
@@ -171,6 +172,23 @@ async function main(){
   assert(Number(q("select count(*) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='public' and c.contype='f'"))>0,'Application foreign keys missing');
   console.log('PASS: application post-data, RLS policies, foreign keys and archived grant entries restored');
   restoreDataTables(storage,'storage',['buckets','objects']);
+  // Reattach only the archived application-specific cross-schema objects, not
+  // provider-managed schema definitions or migrations.
+  const hookList=tool('pg_restore',['--list',auth]).split('\n')
+    .filter(l=>/^\d+;\s+\d+\s+\d+\s+TRIGGER auth users on_auth_user_created\s/.test(l));
+  assert.equal(hookList.length,1,'Archived Auth profile-link trigger missing');
+  const hookFile=path.join(tmp,'auth-hook.toc');
+  fs.writeFileSync(hookFile,hookList.join('\n')+'\n',{mode:0o600});
+  pgRestore(auth,['--use-list',hookFile]);
+  const storagePolicyList=tool('pg_restore',['--list',storage]).split('\n')
+    .filter(l=>/^\d+;\s+\d+\s+\d+\s+POLICY storage objects (client videos scoped |exercise videos |inbody scoped |message media scoped )/.test(l));
+  assert.equal(storagePolicyList.length,14,'Archived Pure Function Storage policies incomplete');
+  const storagePolicyFile=path.join(tmp,'storage-policies.toc');
+  fs.writeFileSync(storagePolicyFile,storagePolicyList.join('\n')+'\n',{mode:0o600});
+  pgRestore(storage,['--use-list',storagePolicyFile]);
+  assert.equal(Number(q("select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname ~ '^(client videos scoped |exercise videos |inbody scoped |message media scoped )'")),14,'Restored Storage policies incomplete');
+  assert.equal(Number(q("select count(*) from pg_trigger where tgrelid='auth.users'::regclass and tgname='on_auth_user_created' and not tgisinternal")),1,'Auth profile-link trigger missing');
+  console.log('PASS: archived app-specific Storage policies and Auth profile-link trigger restored');
   // Reattach only the archived Storage bytes to disposable local object storage.
   const client=createClient(api,localServiceKey,{auth:{persistSession:false,autoRefreshToken:false}});
   for(const obj of inventory.objects){
@@ -191,7 +209,50 @@ async function main(){
   assert.equal(inventory.objectCount,manifest.storageSummary.objectCount);
   console.log('PASS: real Auth and application rows restored to disposable PostgreSQL');
   console.log('PASS: archived Storage objects restored and downloaded with matching SHA-256');
-  console.log('PASS: isolated data/schema recovery; live password login and Storage policy parity still require separate acceptance');
+  // The original passwords are intentionally not available. Prove that Auth
+  // works on the restored environment by creating a synthetic coach and client,
+  // then snapshot/replay their password hashes locally and sign in again.
+  // Never send an email, alter the real source database, or emit credentials.
+  const crypto=require('node:crypto');
+  const tag=crypto.randomUUID().replace(/-/g,'');
+  const coachEmail='pf-restore-coach-'+tag+'@example.test';
+  const memberEmail='pf-restore-member-'+tag+'@example.test';
+  const cid='pf-restore-'+tag;
+  const password='SyntheticOnly!7_'+crypto.randomBytes(24).toString('hex');
+  const makeClient=()=>createClient(api,localAnonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+  const ok=async (promise,label)=>{const {data,error}=await promise;assert(!error,label+' failed');return data;};
+  q("insert into private.coach_allowlist(email) values ('"+coachEmail+"')");
+  const coach=await ok(client.auth.admin.createUser({email:coachEmail,password,email_confirm:true}),'Synthetic coach creation');
+  const coachUid=coach.user.id;
+  assert(/^[a-f0-9-]{36}$/.test(coachUid),'Invalid synthetic coach ID');
+  const coachApi=makeClient();
+  await ok(coachApi.auth.signInWithPassword({email:coachEmail,password}),'Synthetic coach login');
+  assert.equal((await ok(coachApi.from('profiles').select('role').eq('id',coachUid).single(),'Coach profile read')).role,'coach');
+  await ok(coachApi.from('clients').insert({id:cid,coach_id:coachUid,email:memberEmail,data:{name:'Recovery canary'}}),'Synthetic client record');
+  const member=await ok(client.auth.admin.createUser({email:memberEmail,password,email_confirm:true}),'Synthetic client Auth creation');
+  const memberUid=member.user.id;
+  assert(/^[a-f0-9-]{36}$/.test(memberUid),'Invalid synthetic member ID');
+  const memberApi=makeClient();
+  await ok(memberApi.auth.signInWithPassword({email:memberEmail,password}),'Synthetic client login');
+  assert.equal((await ok(memberApi.from('profiles').select('role,client_id').eq('id',memberUid).single(),'Client profile read')).client_id,cid);
+  // Snapshot ONLY these two synthetic password hashes into a local temporary
+  // table; overwrite ONLY synthetic hashes, then replay and authenticate.
+  // This tests real password hashing/recovery with no real-user password.
+  q("create table private.pf_restore_canary_"+tag+" as select id,encrypted_password from auth.users where id in ('"+coachUid+"','"+memberUid+"')");
+  assert.equal(Number(q("select count(*) from private.pf_restore_canary_"+tag+" where encrypted_password is not null and length(encrypted_password)>0")),2);
+  q("update auth.users set encrypted_password=null where id in ('"+coachUid+"','"+memberUid+"')");
+  q("update auth.users u set encrypted_password=c.encrypted_password from private.pf_restore_canary_"+tag+" c where u.id=c.id");
+  q("drop table private.pf_restore_canary_"+tag);
+  for(const [email,id,role] of [[coachEmail,coachUid,'coach'],[memberEmail,memberUid,'client']]){
+    const fresh=makeClient();
+    const login=await ok(fresh.auth.signInWithPassword({email,password}),'Recovered synthetic password login');
+    assert.equal(login.user.id,id,'Recovered identity changed');
+    assert.equal((await ok(fresh.from('profiles').select('role').eq('id',id).single(),'Recovered profile read')).role,role);
+    assert.equal((await ok(fresh.from('clients').select('id').eq('id',cid),'Recovered client scope')).length,1);
+    await fresh.auth.signOut();
+  }
+  console.log('PASS: synthetic coach/client original passwords, roles and scoped REST access work after local credential replay');
+  console.log('PASS: isolated recovery rehearsal; real-user password login and complete provider configuration parity remain unverified');
 }
 main().catch(err=>{
   // Never emit underlying database errors, object contents, passwords or keys.
