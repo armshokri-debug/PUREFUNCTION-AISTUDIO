@@ -53,7 +53,7 @@ describe('bundled local nutrition reference', () => {
   });
   it('uses source household portions only when unambiguous', () => {
     const row=FOOD_CATALOG.find(row=>row[0]==='olive-oil')!;
-    const match=row[9].find(([label])=>label.toLowerCase()==='1 tbsp')!;
+    const match=row[9].find(([label])=>label.toLowerCase()==='1 tablespoon')!;
     expect(match).toBeDefined();
     expect(analyzeLocalFood('1 tbsp olive oil').items[0].grams).toBe(match[1]);
   });
