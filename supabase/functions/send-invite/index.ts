@@ -14,6 +14,11 @@ Deno.serve(async (req) => {
   return handleSendInvite(req, {
     appUrl: APP_URL,
     cooldown: inviteCooldown,
+    reserveAttempt: async (subject) => {
+      const { data, error } = await admin.rpc('pf_reserve_api_budget', { p_scope: 'client_invite', p_subject: subject });
+      if (error) throw error;
+      return data === true;
+    },
     sendEmail: sendTransactionalEmail,
     getExistingAccount: async (email) => {
       // Restricted service-role lookup. A client JWT must never enumerate users.
