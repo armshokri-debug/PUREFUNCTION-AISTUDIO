@@ -137,7 +137,7 @@ const SyncBadge: React.FC<{ sync: SyncState; railOnTablet?: boolean }> = ({ sync
   const map = {
     saved: { icon: <Cloud className="w-3.5 h-3.5" />, text: 'Saved', cls: 'text-gray-400' },
     saving: { icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />, text: 'Saving…', cls: 'text-gray-500' },
-    error: { icon: <CloudOff className="w-3.5 h-3.5" />, text: 'Not saved — retrying', cls: 'text-red-600' },
+    error: { icon: <CloudOff className="w-3.5 h-3.5" />, text: 'Not saved — check connection / Save now', cls: 'text-red-600' },
     offline: { icon: <CloudOff className="w-3.5 h-3.5" />, text: 'Offline — will save', cls: 'text-[#B45309]' }
   }[sync];
   return (
