@@ -15,6 +15,7 @@ const rows = new Map(FOOD_CATALOG.map(row => [row[0], row]));
 const byId = new Map(FOOD_CATALOG.map(row => [row[2], row]));
 const names = new Map<string, FoodRow[]>();
 for (const row of FOOD_CATALOG) {
+  if (row[0].startsWith('fdc-')) continue; // Expanded records require explicit reference selection.
   for (const name of new Set([normalize(row[0]),normalize(row[1]),normalize(row[3])])) {
     const existing = names.get(name) ?? [];
     names.set(name,[...existing,row]);
