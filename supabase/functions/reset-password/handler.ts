@@ -78,12 +78,16 @@ export async function handleResetPassword(req: Request, deps: ResetPasswordDeps)
     if (!error && hashedToken) {
       const link = new URL(recoveryAppUrl(deps.appUrl, req.headers.get('Origin')));
       link.searchParams.set('reset', hashedToken);
+      // Distinguish each request in mail clients that group identical subjects
+      // or hide repeated message content. No token or account data in the subject.
+      const requestedAt = new Date(now).toISOString();
       const r = await deps.sendEmail(
         recipient,
-        'Reset your Pure Function password',
+        `Reset your Pure Function password — ${requestedAt}`,
         layout(
           'Reset your password',
           [
+            `Recovery requested at ${requestedAt} (UTC). Use only the newest recovery email.`,
             'Tap the button to choose a new password. The link works once and expires in 1 hour.',
             'If you didn’t ask for this, ignore this email.'
           ],
