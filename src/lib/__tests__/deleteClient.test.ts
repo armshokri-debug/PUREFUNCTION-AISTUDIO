@@ -169,8 +169,8 @@ describe('Staged, trackable, idempotent handleDeleteClient', () => {
   it('removes media added after the initial inventory', async () => {
     const { deps, state } = createSyntheticHarness();
     const base = deps.deleteOwnedClientRow;
-    deps.deleteOwnedClientRow = vi.fn(async (token, id) => {
-      const result = await base(token, id);
+    deps.deleteOwnedClientRow = vi.fn(async (token, id, coachId, leaseId) => {
+      const result = await base(token, id, coachId, leaseId);
       state.storage.get('client-videos')!.add('client-1/late.mp4');
       return result;
     });
@@ -223,9 +223,9 @@ describe('Staged, trackable, idempotent handleDeleteClient', () => {
     let failDb = true;
     const { deps, state } = createSyntheticHarness();
     const baseDeleteRow = deps.deleteOwnedClientRow;
-    deps.deleteOwnedClientRow = vi.fn(async (token, id) => {
+    deps.deleteOwnedClientRow = vi.fn(async (token, id, coachId, leaseId) => {
       if (failDb) return { deleted: false, error: { message: 'db timeout' } };
-      return baseDeleteRow(token, id);
+      return baseDeleteRow(token, id, coachId, leaseId);
     });
 
     // Attempt 1: DB fails -> Auth MUST NOT be deleted and MUST be unlocked back to active.
