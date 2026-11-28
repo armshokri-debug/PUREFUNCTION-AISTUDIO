@@ -63,6 +63,29 @@ function pgRestore(file,mode, extra=[], restoreAcl=false) {
     throw Error('Local restore failed for '+path.basename(file)+tableNote+(safe?' / '+safe:''));
   }
 }
+// Provider-owned default grants and objects require their owner or a local
+// database administrator. Never grant the hosted postgres role membership in
+// supabase_admin. Only the disposable runner's exact Docker DB is permitted.
+function restoreLocalAdmin(file,tocFile,restoreAcl=false) {
+  const container='supabase_db_pf-restore-local';
+  assert.equal(tool('docker',['inspect','--format','{{.Name}}',container]).trim(),'/'+container,
+    'Blocked: expected disposable database container not found');
+  const port=new URL(db).port || '5432';
+  const published=tool('docker',['port',container,'5432/tcp']).trim().split('\n');
+  assert(published.some(line=>line.endsWith(':'+port)),'Blocked: local database port does not match container');
+  const args=['exec','-i',container,'psql','-X','-w','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1'];
+  const identity=tool('docker',[...args,'-Atc',"select current_user || ':' || current_database()"]).trim();
+  assert.equal(identity,'supabase_admin:postgres','Blocked: local admin identity mismatch');
+  const sqlFile=path.join(tmp,'local-admin-'+path.basename(tocFile)+'.sql');
+  try {
+    tool('pg_restore',['--no-owner',...(restoreAcl?[]:['--no-privileges']),'--use-list',tocFile,'--file',sqlFile,file]);
+    execFileSync('docker',[...args,'--single-transaction','-f','-'],{
+      input:fs.readFileSync(sqlFile),stdio:['pipe','pipe','pipe'],timeout:180000,maxBuffer:5*1024*1024
+    });
+  } catch {
+    throw Error('Disposable local administrative restore failed for '+path.basename(tocFile));
+  } finally { fs.rmSync(sqlFile,{force:true}); }
+}
 async function fileFromDrive(token,name,output) {
   const u=new URL('https://www.googleapis.com/drive/v3/files');
   u.searchParams.set('q',`'${folderId}' in parents and name='${name}' and trashed=false`);
@@ -160,12 +183,18 @@ async function main(){
   // indexes, triggers and RLS policies live in the post-data section.
   pgRestore(pub,['--section=post-data']);
   // Restore application ACLs explicitly without overwriting provider-managed Auth/Storage ACLs.
-  const aclList=tool('pg_restore',['--list',pub]).split('\n')
-    .filter(l=>/^\d+;\s+\d+\s+\d+\s+(DEFAULT ACL|ACL)\s/.test(l));
+  const appToc=tool('pg_restore',['--list',pub]).split('\n');
+  const aclList=appToc.filter(l=>/^\d+;\s+\d+\s+\d+\s+ACL\s/.test(l));
+  const defaultAclList=appToc.filter(l=>/^\d+;\s+\d+\s+\d+\s+DEFAULT ACL\s/.test(l));
   assert(aclList.length>0,'Application grant entries are missing from archive');
+  assert(defaultAclList.length>0,'Archived default grant entries missing');
   const aclFile=path.join(tmp,'app-acl.toc');
+  const defaultAclFile=path.join(tmp,'app-default-acl.toc');
   fs.writeFileSync(aclFile,aclList.join('\n')+'\n',{mode:0o600});
+  fs.writeFileSync(defaultAclFile,defaultAclList.join('\n')+'\n',{mode:0o600});
   pgRestore(pub,['--use-list',aclFile],[],true);
+  restoreLocalAdmin(pub,defaultAclFile,true);
+  console.log('PASS: archived default privileges replayed by verified disposable database administrator');
   assert.equal(Number(q("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and not c.relrowsecurity")),0,
     'Restored application tables must have RLS enabled');
   assert(Number(q("select count(*) from pg_policies where schemaname='public'"))>0,'Application RLS policies missing');
@@ -179,13 +208,13 @@ async function main(){
   assert.equal(hookList.length,1,'Archived Auth profile-link trigger missing');
   const hookFile=path.join(tmp,'auth-hook.toc');
   fs.writeFileSync(hookFile,hookList.join('\n')+'\n',{mode:0o600});
-  pgRestore(auth,['--use-list',hookFile]);
+  restoreLocalAdmin(auth,hookFile);
   const storagePolicyList=tool('pg_restore',['--list',storage]).split('\n')
     .filter(l=>/^\d+;\s+\d+\s+\d+\s+POLICY storage objects (client videos scoped |exercise videos |inbody scoped |message media scoped )/.test(l));
   assert.equal(storagePolicyList.length,14,'Archived Pure Function Storage policies incomplete');
   const storagePolicyFile=path.join(tmp,'storage-policies.toc');
   fs.writeFileSync(storagePolicyFile,storagePolicyList.join('\n')+'\n',{mode:0o600});
-  pgRestore(storage,['--use-list',storagePolicyFile]);
+  restoreLocalAdmin(storage,storagePolicyFile);
   assert.equal(Number(q("select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname ~ '^(client videos scoped |exercise videos |inbody scoped |message media scoped )'")),14,'Restored Storage policies incomplete');
   assert.equal(Number(q("select count(*) from pg_trigger where tgrelid='auth.users'::regclass and tgname='on_auth_user_created' and not tgisinternal")),1,'Auth profile-link trigger missing');
   console.log('PASS: archived app-specific Storage policies and Auth profile-link trigger restored');
