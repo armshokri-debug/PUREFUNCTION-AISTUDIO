@@ -1,0 +1,55 @@
+name: Hosted QA API smoke (synthetic only)
+on:
+  pull_request:
+    paths: ['.github/workflows/qa-hosted-api-budget-smoke.yml']
+permissions:
+  contents: read
+concurrency:
+  group: pf-hosted-qa-api-smoke
+  cancel-in-progress: false
+jobs:
+  qa:
+    if: github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'qa/hosted-api-budget-smoke-20261128'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify public recovery and registration, and reject unauthorized calls
+        env:
+          QA_URL: https://nsshdxxdvzzxlmdomixf.supabase.co
+          QA_PUBLISHABLE_KEY: sb_publishable_JqU0jitqGGj4GQayz2XmNg_pJ15b_G7
+        shell: bash
+        run: |
+          node <<'JS'
+          const assert=require('node:assert/strict');
+          const origin=process.env.QA_URL;
+          assert.equal(origin,'https://nsshdxxdvzzxlmdomixf.supabase.co');
+          assert(process.env.QA_PUBLISHABLE_KEY.startsWith('sb_publishable_'));
+          const unknown='pf-budget-smoke-'+process.env.GITHUB_RUN_ID+'@example.test';
+          const known='pf-cloudflare-coach-2511@qa.invalid';
+          const call=async(name,body)=>{
+            const res=await fetch(origin+'/functions/v1/'+name,{
+              method:'POST',headers:{apikey:process.env.QA_PUBLISHABLE_KEY,'Content-Type':'application/json'},
+              body:JSON.stringify(body),signal:AbortSignal.timeout(15000)
+            });
+            return {status:res.status,body:await res.json().catch(()=>null)};
+          };
+          (async()=>{
+            const a=await call('reset-password',{email:unknown});
+            const b=await call('reset-password',{email:known});
+            const c=await call('reset-password',{email:known});
+            for(const r of [a,b,c]) {
+              assert.equal(r.status,200,'Recovery response HTTP '+r.status);
+              assert.deepEqual(r.body,{ok:true});
+            }
+            console.log('PASS: known, unknown and duplicate recovery requests have identical public responses; QA mail capture only');
+            const s=await call('sign-up',{email:unknown,password:'SyntheticOnly!2026'});
+            assert.equal(s.status,200,'Signup response HTTP '+s.status);
+            assert.deepEqual(s.body,{ok:true,verificationRequired:true});
+            console.log('PASS: unknown signup receives generic response');
+            for(const name of ['send-invite','invite-trainer','food-parse','delete-client']){
+              const r=await call(name,{clientId:'pf-nonexistent-smoke',email:unknown,description:'synthetic test',confirm:true});
+              assert([401,403].includes(r.status),name+' unexpected HTTP '+r.status);
+              console.log('PASS: '+name+' denies unauthenticated requests');
+            }
+          })().catch(err=>{console.error('FAIL: '+err.message);process.exitCode=1});
+          JS
