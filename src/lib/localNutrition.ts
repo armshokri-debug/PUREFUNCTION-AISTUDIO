@@ -12,9 +12,10 @@ const normalize = (s: string) => s.normalize('NFKC').toLowerCase()
   .replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[\u200c\u200d]/g,' ')
   .replace(/[-–]/g,' ').replace(/\s+/g,' ').trim();
 const rows = new Map(FOOD_CATALOG.map(row => [row[0], row]));
+const byId = new Map(FOOD_CATALOG.map(row => [row[2], row]));
 const names = new Map<string, FoodRow[]>();
 for (const row of FOOD_CATALOG) {
-  for (const name of new Set([normalize(row[0]),normalize(row[1])])) {
+  for (const name of new Set([normalize(row[0]),normalize(row[1]),normalize(row[3])])) {
     const existing = names.get(name) ?? [];
     names.set(name,[...existing,row]);
   }
@@ -31,9 +32,12 @@ const aliases: Record<string,string> = {
   'olive oil':'olive-oil','روغن زیتون':'olive-oil','whole milk':'whole-milk','شیر پرچرب':'whole-milk',
   'plain whole milk yogurt':'plain-yogurt','plain low fat yogurt':'low-fat-yogurt',
   'dry oats':'oatmeal','جو دوسر خشک':'oatmeal','boiled potatoes':'boiled-potato','سیب زمینی آب پز':'boiled-potato',
-  'almond':'almonds','بادام':'almonds','خیار':'cucumber','گوجه فرنگی':'tomato','پرتقال':'orange'
+  'almond':'almonds','بادام':'almonds','خیار':'cucumber','گوجه فرنگی':'tomato','پرتقال':'orange',
+  'raw atlantic farmed salmon':'salmon','raw shrimp':'shrimp','light tuna canned in water drained':'tuna',
+  'cooked lentils':'lentils','cooked chickpeas':'chickpeas','cooked quinoa':'quinoa','raw potato':'potato',
+  'عدس پخته':'lentils','نخود پخته':'chickpeas','کینوا پخته':'quinoa','سیب زمینی خام':'potato'
 };
-const ambiguous = new Set(['rice','white rice','brown rice','chicken','chicken breast','برنج','مرغ','سینه مرغ','milk','yogurt','plain yogurt','شیر','ماست','oats','oatmeal','potato','سیب زمینی','egg','eggs','تخم مرغ']);
+const ambiguous = new Set(['rice','white rice','brown rice','chicken','chicken breast','برنج','مرغ','سینه مرغ','milk','yogurt','plain yogurt','شیر','ماست','oats','oatmeal','potato','سیب زمینی','egg','eggs','تخم مرغ','salmon','shrimp','tuna','chicken wings','chicken liver','beef liver','pork chop','ground turkey','ground beef','lentils','chickpeas','quinoa','pasta','ماهی','ماهی تن','میگو','عدس','نخود','کینوا']);
 const canonicalUnit = (unit: string): string => {
   if (/^(kg|kilograms?|کیلوگرم)$/.test(unit)) return 'kg';
   if (/^(g|grams?|گرم)$/.test(unit)) return 'g';
@@ -43,7 +47,7 @@ const canonicalUnit = (unit: string): string => {
   if (/^(pieces?|عدد)$/.test(unit)) return 'piece';
   return 'serving';
 };
-const amount = '(\\d+(?:\\.\\d+)?|\\d+\\s*/\\s*\\d+)';
+const amount = '(\\d+\\s*/\\s*\\d+|\\d+(?:\\.\\d+)?|\\.\\d+)';
 const units = '(kilograms?|kg|grams?|g|ounces?|oz|cups?|tablespoons?|tbsp|pieces?|servings?|کیلوگرم|گرم|پیمانه|فنجان|قاشق غذاخوری|عدد)';
 const leading = new RegExp('^'+amount+'\\s*'+units+'\\s+(.+)$','u');
 const trailing = new RegExp('^(.+?)\\s+'+amount+'\\s*'+units+'$','u');
@@ -60,8 +64,9 @@ function portion(text: string): { food:string; quantity:number; unit:string; exp
 }
 function stateOf(row: FoodRow): string {
   const d=normalize(row[3]);
-  if (/\b(raw|uncooked|dry)\b/.test(d)) return 'raw';
-  if (/\b(cooked|roasted|boiled|baked|grilled|fried|steamed)\b/.test(d)) return 'cooked';
+  if (/\b(uncooked|raw)\b/.test(d)) return 'raw';
+  if (/\b(cooked|roasted|boiled|baked|grilled|fried|steamed|braised|broiled|simmered)\b/.test(d)) return 'cooked';
+  if (/\b(dry)\b/.test(d)) return 'raw';
   return 'unknown';
 }
 function gramsFor(row:FoodRow, quantity:number, unit:string):number|null {
@@ -86,14 +91,19 @@ export function analyzeLocalFood(description:string):{items:LocalEstimate[];ques
   if (/\d,\d|\d\s*[-–]\s*\d/.test(description.replace(/[۰-۹]/g,c=>String(c.charCodeAt(0)-1776)).replace(/[٠-٩]/g,c=>String(c.charCodeAt(0)-1632)))) {
     return {items:[],questions:['Use a decimal point and one exact amount per food (e.g. 150 g).']};
   }
-  const segments=text.split(/\s*(?:;|,|[+؛،]|\band\b| و )\s*/u).filter(Boolean);
+  // Preserve compound food names and official descriptions. A conjunction
+  // separates foods only if a new explicit quantity begins after it.
+  const single = normalize(portion(text).food);
+  const segments = (names.has(single) || Object.hasOwn(aliases,single) || /^fdc:\d+$/.test(single)
+    ? [text] : text.split(/\s*(?:;|[؛،]|\band\b(?=\s+\d)| و (?=\d)|\+(?=\s*\d)|,(?=\s*\d))\s*/u)).filter(Boolean);
   if (segments.length>20) return {items:[],questions:['Analyze at most 20 foods at a time.']};
   const items:LocalEstimate[]=[]; const questions:string[]=[];
   for (const part of segments) {
     const p=portion(part); const food=normalize(p.food);
     const validQuantity=Number.isFinite(p.quantity)&&p.quantity>0&&p.quantity<100000;
     const candidates=names.get(food)??[];
-    const row=ambiguous.has(food)?undefined:rows.get(aliases[food]??'')??(candidates.length===1?candidates[0]:undefined);
+    const selectedId = /^fdc:(\d+)$/.exec(food)?.[1];
+    const row=selectedId ? byId.get(selectedId) : ambiguous.has(food)?undefined:rows.get(Object.hasOwn(aliases,food)?aliases[food]:'')??(candidates.length===1?candidates[0]:undefined);
     let grams:number|null=null;
     if (p.explicit&&validQuantity) {
       grams=row?gramsFor(row,p.quantity,p.unit):p.unit==='g'?p.quantity:p.unit==='kg'?p.quantity*1000:p.unit==='oz'?p.quantity*28.349523125:null;
@@ -101,6 +111,7 @@ export function analyzeLocalFood(description:string):{items:LocalEstimate[];ques
     }
     const label=food.slice(0,200)||part.slice(0,200);
     if (!row) questions.push(ambiguous.has(food)?'Specify preparation or type for "'+label+'", e.g. cooked or raw, or enter values manually.':'No exact local match for "'+label+'". Specify ingredients or enter label values manually.');
+
     if (grams===null) questions.push('Specify a weight in grams for "'+label+'".');
     const kcalPerGram=row&&row[5]!==null?row[5]/100:null;
     const proteinPerGram=row&&row[6]!==null?row[6]/100:null;
@@ -109,7 +120,20 @@ export function analyzeLocalFood(description:string):{items:LocalEstimate[];ques
       fat:row?nutrient(row[7],grams,1):null,carbs:row?nutrient(row[8],grams,1):null,
       source:row?'USDA':'generic',sourceId:row?row[2]:null,
       assumptions:row?'USDA reference: '+row[3]+'. '+(grams===null?'Weight not confirmed.':'Values are estimates; added oils, sauces and brands may differ.'): 'Unmatched food; no nutrient values inferred.',
-      version:'local-food-2026-11-18',kcalPerGram,proteinPerGram});
+      version:'local-food-2026-11-18-v2',kcalPerGram,proteinPerGram});
   }
   return {items,questions};
+}
+
+/** Suggestions are never auto-applied: user explicitly chooses a reference ID. */
+export function searchLocalFoods(query:string):FoodRow[] {
+  const q=normalize(query);
+  if(q.length<2)return [];
+  const tokens=q.split(/\s+/).filter(Boolean);
+  const alias=Object.hasOwn(aliases,q)?aliases[q]:null;
+  return FOOD_CATALOG.map(row=>{
+    const n=normalize(row[1]), d=normalize(row[3]), slug=normalize(row[0]);
+    const score=row[0]===alias?100:n===q||slug===q?90:n.startsWith(q)?70:n.includes(q)?50:tokens.every(t=>d.includes(t))?30:0;
+    return {row,score};
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score||a.row[1].localeCompare(b.row[1])).slice(0,12).map(x=>x.row);
 }
