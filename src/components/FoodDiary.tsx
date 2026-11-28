@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../cloud/supabase';
 import { todayISO } from '../lib/workouts';
-import { analyzeLocalFood, type LocalEstimate } from '../lib/localNutrition';
+import { analyzeLocalFood, searchLocalFoods, type LocalEstimate } from '../lib/localNutrition';
 
 interface Entry { id: string; date: string; description: string; status: string }
 interface Item { entry_id: string; name: string; kcal: number | null; protein: number | null }
@@ -12,6 +12,10 @@ export function FoodDiary({ clientId, readOnly = false }: { clientId: string; re
   const [entries, setEntries] = useState<Entry[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [description, setDescription] = useState('');
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogId, setCatalogId] = useState('');
+  const [catalogGrams, setCatalogGrams] = useState('100');
+  const catalogMatches = React.useMemo(() => searchLocalFoods(catalogQuery), [catalogQuery]);
   const [date, setDate] = useState(todayISO());
   const [kcal, setKcal] = useState('');
   const [protein, setProtein] = useState('');
@@ -37,6 +41,7 @@ export function FoodDiary({ clientId, readOnly = false }: { clientId: string; re
     let active = true;
     scope.current++;
     setReady(false); setEntries([]); setItems([]); setError(null);
+    setCatalogQuery(''); setCatalogId(''); setCatalogGrams('100');
     setDescription(''); setDate(todayISO()); setKcal(''); setProtein('');
     setBusy(false); clearAnalysis(); key.current = null;
     if (supabase) void load().then((data) => { if (active) { setEntries(data.entries); setItems(data.items); setReady(true); } })
@@ -88,6 +93,16 @@ export function FoodDiary({ clientId, readOnly = false }: { clientId: string; re
       <label className="text-sm">Food and portion<textarea aria-label="Food and portion" required disabled={locked} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); clearAnalysis(); setKcal(''); setProtein(''); if (ready) setError(null); }} className="block w-full border rounded-xl p-3 text-base" /></label>
       <button type="button" disabled={locked || !description.trim()} onClick={analyze} className="min-h-[44px] rounded-full border border-gray-300 font-semibold disabled:opacity-40">Analyze food</button>
       <p className="text-xs text-gray-500">Local USDA food reference · no external AI or API. Analysis works offline; saving requires a connection.</p>
+      <details className="rounded-xl border p-3">
+        <summary className="cursor-pointer text-sm font-semibold">Search food library</summary>
+        <div className="grid gap-2 mt-3">
+          <label className="text-sm">Search food<input aria-label="Search food library" value={catalogQuery} disabled={locked} onChange={e=>{setCatalogQuery(e.target.value);setCatalogId('');}} className="block w-full border rounded-lg p-2" /></label>
+          {catalogQuery.trim().length>=2 && !catalogMatches.length && <p className="text-sm">No matching reference. Try an ingredient or enter label values manually.</p>}
+          {catalogMatches.map(row=><label key={row[2]} className="flex gap-2 items-start text-sm border rounded-lg p-2"><input type="radio" name="food-reference" checked={catalogId===row[2]} disabled={locked} onChange={()=>setCatalogId(row[2])}/><span>{row[1]}<span className="block text-xs text-gray-600">{row[3]} · {row[5]??'Unknown'} kcal / 100 g · FDC {row[2]}</span></span></label>)}
+          {catalogMatches.length>0 && <><label className="text-sm">Weight (g)<input aria-label="Library weight in grams" type="number" min="0.1" max="5000" step="any" value={catalogGrams} disabled={locked} onChange={e=>setCatalogGrams(e.target.value)} className="block w-full border rounded-lg p-2" /></label>
+          <button type="button" disabled={locked||!catalogMatches.some(row=>row[2]===catalogId)||!Number.isFinite(Number(catalogGrams))||Number(catalogGrams)<=0||Number(catalogGrams)>5000} onClick={()=>{const line=Number(catalogGrams)+' g fdc:'+catalogId;const next=description.trim()?description.trim()+'; '+line:line;if(next.length>2000)return;setDescription(next);clearAnalysis();setKcal('');setProtein('');setCatalogId('');}} className="border rounded-lg p-2">Add selected food</button></>}
+        </div>
+      </details>
       {questions.length > 0 && <div className="text-sm bg-gray-50 rounded-xl p-3" role="status"><p className="font-semibold">Please clarify your food description:</p><ul className="list-disc pl-5">{questions.map((question, i) => <li key={i}>{question}</li>)}</ul></div>}
       {estimates ? <div className="grid gap-3 min-w-0">
         <p className="text-sm font-semibold">Review food estimates</p>
@@ -96,6 +111,7 @@ export function FoodDiary({ clientId, readOnly = false }: { clientId: string; re
           <p className="text-sm font-semibold break-words">{item.name}</p>
           <p className="text-xs text-gray-600">{item.quantity} {item.unit}{item.grams !== null ? ' · ' + item.grams + ' g' : ''} · {item.state} · {item.source}</p>
           {item.assumptions && <p className="text-xs text-gray-500 break-words">{item.assumptions}</p>}
+          {item.source==='USDA' && item.sourceId && <a className="text-xs underline" target="_blank" rel="noreferrer" href={'https://fdc.nal.usda.gov/food-details/'+encodeURIComponent(item.sourceId)+'/nutrients'}>USDA FDC {item.sourceId}</a>}
           {item.source === 'USDA' && <p className="text-xs text-gray-600">Fat: {item.fat ?? 'Unknown'} g · Carbs: {item.carbs ?? 'Unknown'} g (reference only)</p>}
           <div className="grid grid-cols-2 gap-2">
             <label className="text-sm">Calories (kcal)<input aria-label={'Estimated calories for ' + item.name} type="number" min="0" step="any" disabled={locked} value={item.kcal ?? ''} onChange={e => editEstimate(i, 'kcal', e.target.value)} className="block w-full min-w-0 border rounded-xl p-2 text-base" /></label>
