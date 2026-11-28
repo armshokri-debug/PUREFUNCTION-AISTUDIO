@@ -119,7 +119,7 @@ export function FoodDiary({ clientId, readOnly = false }: { clientId: string; re
       finally { if (scope.current === requestScope) setBusy(false); }
     }}>
       <label className="text-sm">Date<input type="date" required disabled={locked} value={date} max={todayISO()} onChange={(e) => { setDate(e.target.value); key.current = null; }} className="block w-full min-w-0 border rounded-xl px-3 py-3 text-base" /></label>
-      <label className="text-sm">Food and portion<textarea required disabled={locked} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); clearAnalysis(); setError(null); }} className="block w-full border rounded-xl p-3 text-base" /></label>
+      <label className="text-sm">Food and portion<textarea aria-label="Food and portion" required disabled={locked} maxLength={2000} value={description} onChange={(e) => { setDescription(e.target.value); clearAnalysis(); setError(null); }} className="block w-full border rounded-xl p-3 text-base" /></label>
       <button type="button" disabled={!ready || locked || !description.trim()} onClick={() => void analyze()} className="min-h-[44px] rounded-full border border-gray-300 font-semibold disabled:opacity-40">{analyzing ? 'Analyzing…' : 'Analyze with AI'}</button>
       {questions.length > 0 && <div className="text-sm bg-gray-50 rounded-xl p-3" role="status"><p className="font-semibold">Please clarify your food description:</p><ul className="list-disc pl-5">{questions.map((question, i) => <li key={i}>{question}</li>)}</ul></div>}
       {estimates ? <div className="grid gap-3 min-w-0">
