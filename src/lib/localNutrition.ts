@@ -94,7 +94,7 @@ export function analyzeLocalFood(description:string):{items:LocalEstimate[];ques
   // Preserve compound food names and official descriptions. A conjunction
   // separates foods only if a new explicit quantity begins after it.
   const single = normalize(portion(text).food);
-  const segments = (names.has(single) || Object.hasOwn(aliases,single) || /^fdc:\d+$/.test(single)
+  const segments = (names.has(single) || Object.prototype.hasOwnProperty.call(aliases,single) || /^fdc:\d+$/.test(single)
     ? [text] : text.split(/\s*(?:;|[؛،]|\band\b(?=\s+\d)| و (?=\d)|\+(?=\s*\d)|,(?=\s*\d))\s*/u)).filter(Boolean);
   if (segments.length>20) return {items:[],questions:['Analyze at most 20 foods at a time.']};
   const items:LocalEstimate[]=[]; const questions:string[]=[];
@@ -103,7 +103,7 @@ export function analyzeLocalFood(description:string):{items:LocalEstimate[];ques
     const validQuantity=Number.isFinite(p.quantity)&&p.quantity>0&&p.quantity<100000;
     const candidates=names.get(food)??[];
     const selectedId = /^fdc:(\d+)$/.exec(food)?.[1];
-    const row=selectedId ? byId.get(selectedId) : ambiguous.has(food)?undefined:rows.get(Object.hasOwn(aliases,food)?aliases[food]:'')??(candidates.length===1?candidates[0]:undefined);
+    const row=selectedId ? byId.get(selectedId) : ambiguous.has(food)?undefined:rows.get(Object.prototype.hasOwnProperty.call(aliases,food)?aliases[food]:'')??(candidates.length===1?candidates[0]:undefined);
     let grams:number|null=null;
     if (p.explicit&&validQuantity) {
       grams=row?gramsFor(row,p.quantity,p.unit):p.unit==='g'?p.quantity:p.unit==='kg'?p.quantity*1000:p.unit==='oz'?p.quantity*28.349523125:null;
@@ -130,10 +130,11 @@ export function searchLocalFoods(query:string):FoodRow[] {
   const q=normalize(query);
   if(q.length<2)return [];
   const tokens=q.split(/\s+/).filter(Boolean);
-  const alias=Object.hasOwn(aliases,q)?aliases[q]:null;
+  const alias=Object.prototype.hasOwnProperty.call(aliases,q)?aliases[q]:null;
   return FOOD_CATALOG.map(row=>{
     const n=normalize(row[1]), d=normalize(row[3]), slug=normalize(row[0]);
-    const score=row[0]===alias?100:n===q||slug===q?90:n.startsWith(q)?70:n.includes(q)?50:tokens.every(t=>d.includes(t))?30:0;
+    const riceVariant=q==='rice'&&['white-rice','white-rice-raw','brown-rice','brown-rice-raw'].includes(row[0]);
+    const score=row[0]===alias?100:n===q||slug===q?90:riceVariant?80:n.startsWith(q)?70:n.includes(q)?50:tokens.every(t=>d.includes(t))?30:0;
     return {row,score};
   }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score||a.row[1].localeCompare(b.row[1])).slice(0,12).map(x=>x.row);
 }
