@@ -142,6 +142,16 @@ module.exports = function createMock({ coachEmail = 'coach@example.com', otherCo
       }
       return json(route, 200, { ok: true });
     }
+    if (path === '/functions/v1/food-parse') {
+      const prof = profileOf(uidFrom(req));
+      if (!prof || prof.role !== 'client') return json(route, 403, { error: 'Access denied' });
+      const b = JSON.parse(req.postData() || '{}');
+      if (b.description === 'Unavailable food') return json(route, 503, { error: 'Analysis unavailable. Enter foods manually.' });
+      return json(route, 200, { items: [
+        { name: 'Cooked chicken breast', quantity: 150, unit: 'g', grams: 150, state: 'cooked', kcal: 248, protein: 46.5, source: 'USDA', sourceId: 'synthetic-chicken', assumptions: '', version: 'food-v1', kcalPerGram: 1.65, proteinPerGram: 0.31 },
+        { name: 'Cooked rice', quantity: 100, unit: 'g', grams: 100, state: 'cooked', kcal: 130, protein: 2.7, source: 'USDA', sourceId: 'synthetic-rice', assumptions: '', version: 'food-v1', kcalPerGram: 1.3, proteinPerGram: 0.027 }
+      ], questions: [] });
+    }
     if (path === '/functions/v1/delete-client') {
       const uid = uidFrom(req);
       const prof = profileOf(uid);

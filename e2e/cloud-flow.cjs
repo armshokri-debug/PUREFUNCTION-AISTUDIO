@@ -237,6 +237,20 @@ const today = iso(new Date());
   await R.getByRole('button', { name: 'Save meal', exact: true }).click();
   await R.getByText(/120 kcal/).waitFor();
   ok(mock.db.food_entries.length === 1 && mock.db.food_items[0].protein === 15, 'client food diary uses normalized secure RPC');
+  await R.getByLabel('Food and portion', { exact: true }).fill('150g cooked chicken breast and 100g cooked rice');
+  await R.getByRole('button', { name: 'Analyze with AI', exact: true }).click();
+  await R.getByText('Review AI estimates', { exact: true }).waitFor();
+  ok(mock.db.food_entries.length === 1 && await R.getByRole('button', { name: 'Save meal', exact: true }).isDisabled(), 'AI analysis does not save before review');
+  await R.getByLabel('Estimated calories for Cooked chicken breast').fill('250');
+  await R.getByLabel('I reviewed these estimates').check();
+  await R.getByRole('button', { name: 'Save meal', exact: true }).click();
+  await R.getByText(/Cooked chicken breast · 250 kcal/).waitFor();
+  ok(mock.db.food_entries.length === 2 && mock.db.food_items.some(i => i.name === 'Cooked rice' && i.source === 'USDA') && mock.db.food_items.some(i => i.name === 'Cooked chicken breast' && i.source === 'manual' && i.kcal === 250), 'reviewed AI foods persist separately, edits are marked manual');
+  await R.getByLabel('Food and portion', { exact: true }).fill('Unavailable food');
+  await R.getByRole('button', { name: 'Analyze with AI', exact: true }).click();
+  await R.getByText('Analysis unavailable. Enter foods manually.', { exact: true }).waitFor();
+  ok(await R.getByLabel('Calories (kcal)', { exact: true }).isEditable() && mock.db.food_entries.length === 2, 'AI failure keeps manual entry available without saving');
+  await R.getByLabel('Food and portion', { exact: true }).fill('');
 
   ok(!(await R.evaluate(() => location.search.includes('invite='))), 'invite parameter removed after sign-in');
   // live: coach adds an exercise -> appears on client without reload
