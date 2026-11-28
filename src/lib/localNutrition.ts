@@ -79,6 +79,8 @@ function nutrient(per100:number|null, grams:number|null, precision:number):numbe
 }
 export function analyzeLocalFood(description:string):{items:LocalEstimate[];questions:string[]} {
   if (!description.trim()||description.length>2000) return {items:[],questions:['Enter a food description of up to 2000 characters.']};
+  // A negative weight must never be normalized into a positive amount.
+  if (/(?:^|[\s;,،؛+])[-−]\s*[0-9۰-۹٠-٩]/u.test(description)) return {items:[],questions:['Use a positive weight for every food.']};
   const text=normalize(description.replace(/\r?\n/g,';'));
   // Do not silently split or guess locale-dependent numeric commas or ranges.
   if (/\d,\d|\d\s*[-–]\s*\d/.test(description.replace(/[۰-۹]/g,c=>String(c.charCodeAt(0)-1776)).replace(/[٠-٩]/g,c=>String(c.charCodeAt(0)-1632)))) {
