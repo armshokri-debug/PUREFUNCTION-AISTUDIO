@@ -12,6 +12,21 @@ import { alternateGoogleMailDomain, emailCooldownKey } from '../_shared/google-e
 
 export const RESET_COOLDOWN_MS = 60_000;
 
+const GITHUB_APP = 'https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/';
+const CLOUDFLARE_APP = 'https://purefunction-live.pages.dev/';
+
+// Select only fixed, trusted production destinations. Never copy an arbitrary
+// Origin, Referer or request-body URL into a recovery link. Preserve QA and
+// other explicitly configured deployments.
+function recoveryAppUrl(configured: string, origin: string | null): string {
+  const base = configured.replace(/\\/+$/, '');
+  if (base !== GITHUB_APP.replace(/\\/+$/, '') && base !== CLOUDFLARE_APP.replace(/\\/+$/, '')) return configured;
+  if (origin === 'https://armshokri-debug.github.io') return GITHUB_APP;
+  if (origin === 'https://purefunction-live.pages.dev') return CLOUDFLARE_APP;
+  return configured;
+}
+
+
 export interface ResetPasswordDeps {
   appUrl: string;
   generateRecoveryLink: (email: string) => Promise<{ hashedToken?: string; error?: unknown }>;
@@ -61,7 +76,7 @@ export async function handleResetPassword(req: Request, deps: ResetPasswordDeps)
       }
     }
     if (!error && hashedToken) {
-      const link = new URL(deps.appUrl);
+      const link = new URL(recoveryAppUrl(deps.appUrl, req.headers.get('Origin')));
       link.searchParams.set('reset', hashedToken);
       const r = await deps.sendEmail(
         recipient,
