@@ -23,6 +23,7 @@ create table if not exists private.client_deletion_jobs (
 create index if not exists client_deletion_jobs_coach_status_idx
   on private.client_deletion_jobs (coach_id, status);
 
+alter table private.client_deletion_jobs enable row level security;
 revoke all on table private.client_deletion_jobs from public, anon, authenticated;
 grant select, insert, update on table private.client_deletion_jobs to service_role;
 
@@ -154,3 +155,53 @@ end;
 $$;
 revoke all on function public.pf_deletion_job_advance(text, text, text, boolean) from public, anon, authenticated;
 grant execute on function public.pf_deletion_job_advance(text, text, text, boolean) to service_role;
+
+-- A persistent lease serializes the multi-service deletion workflow. Do not shorten
+-- the 15-minute expiry below the maximum Edge Function execution lifetime.
+create table if not exists private.client_deletion_leases (
+  client_id text primary key,
+  lease_id uuid not null,
+  expires_at timestamptz not null
+);
+alter table private.client_deletion_leases enable row level security;
+revoke all on private.client_deletion_leases from public, anon, authenticated;
+
+create or replace function public.pf_deletion_lease_acquire(
+  p_client_id text, p_coach_id uuid, p_lease_id uuid
+) returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_lease uuid;
+begin
+  if not exists (select 1 from public.profiles p where p.id = p_coach_id and p.role = 'coach')
+    or not (
+      exists (select 1 from private.client_deletion_jobs j where j.client_id = p_client_id and j.coach_id = p_coach_id)
+      or (not exists (select 1 from private.client_deletion_jobs j where j.client_id = p_client_id)
+          and exists (select 1 from public.clients c where c.id = p_client_id and c.coach_id = p_coach_id))
+    ) then
+    return 'forbidden';
+  end if;
+  insert into private.client_deletion_leases as l (client_id, lease_id, expires_at)
+  values (p_client_id, p_lease_id, pg_catalog.clock_timestamp() + interval '15 minutes')
+  on conflict (client_id) do update
+    set lease_id = excluded.lease_id, expires_at = excluded.expires_at
+    where l.expires_at <= pg_catalog.clock_timestamp()
+  returning lease_id into v_lease;
+  if v_lease is null then return 'busy'; end if;
+  return 'acquired';
+end;
+$$;
+revoke all on function public.pf_deletion_lease_acquire(text, uuid, uuid) from public, anon, authenticated;
+grant execute on function public.pf_deletion_lease_acquire(text, uuid, uuid) to service_role;
+
+create or replace function public.pf_deletion_lease_release(
+  p_client_id text, p_lease_id uuid
+) returns void
+language sql security definer set search_path = ''
+as $$
+  delete from private.client_deletion_leases
+  where client_id = p_client_id and lease_id = p_lease_id;
+$$;
+revoke all on function public.pf_deletion_lease_release(text, uuid) from public, anon, authenticated;
+grant execute on function public.pf_deletion_lease_release(text, uuid) to service_role;

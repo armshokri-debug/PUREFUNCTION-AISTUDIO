@@ -45,9 +45,9 @@ function tool(name,args) {
   });
 }
 const q = s=>tool('psql',[db,'-X','-v','ON_ERROR_STOP=1','-A','-t','-c',s]).trim();
-function pgRestore(file,mode, extra=[]) {
+function pgRestore(file,mode, extra=[], restoreAcl=false) {
   try{
-    tool('pg_restore',['--dbname',db,'--no-owner','--no-privileges',
+    tool('pg_restore',['--dbname',db,'--no-owner',...(restoreAcl?[]:['--no-privileges']),
       '--exit-on-error',...mode,...extra,file]);
   } catch (err) {
     // pg_restore errors can include statements and row data. Print only a
@@ -155,6 +155,21 @@ async function main(){
   restoreDataTables(auth,'auth',['users','identities','sessions','refresh_tokens',
     'mfa_factors','mfa_challenges','mfa_amr_claims','one_time_tokens','flow_state']);
   pgRestore(pub,['--data-only','--disable-triggers']);
+  // A row-only restore is not a complete application recovery: constraints,
+  // indexes, triggers and RLS policies live in the post-data section.
+  pgRestore(pub,['--section=post-data']);
+  // Restore application ACLs explicitly without overwriting provider-managed Auth/Storage ACLs.
+  const aclList=tool('pg_restore',['--list',pub]).split('\n')
+    .filter(l=>/^\d+;\s+\d+\s+\d+\s+(DEFAULT ACL|ACL)\s/.test(l));
+  assert(aclList.length>0,'Application grant entries are missing from archive');
+  const aclFile=path.join(tmp,'app-acl.toc');
+  fs.writeFileSync(aclFile,aclList.join('\n')+'\n',{mode:0o600});
+  pgRestore(pub,['--use-list',aclFile],[],true);
+  assert.equal(Number(q("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and not c.relrowsecurity")),0,
+    'Restored application tables must have RLS enabled');
+  assert(Number(q("select count(*) from pg_policies where schemaname='public'"))>0,'Application RLS policies missing');
+  assert(Number(q("select count(*) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='public' and c.contype='f'"))>0,'Application foreign keys missing');
+  console.log('PASS: application post-data, RLS policies, foreign keys and archived grant entries restored');
   restoreDataTables(storage,'storage',['buckets','objects']);
   // Reattach only the archived Storage bytes to disposable local object storage.
   const client=createClient(api,localServiceKey,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -176,7 +191,7 @@ async function main(){
   assert.equal(inventory.objectCount,manifest.storageSummary.objectCount);
   console.log('PASS: real Auth and application rows restored to disposable PostgreSQL');
   console.log('PASS: archived Storage objects restored and downloaded with matching SHA-256');
-  console.log('PASS: isolated restore acceptance; user data never leaves ephemeral runner');
+  console.log('PASS: isolated data/schema recovery; live password login and Storage policy parity still require separate acceptance');
 }
 main().catch(err=>{
   // Never emit underlying database errors, object contents, passwords or keys.
