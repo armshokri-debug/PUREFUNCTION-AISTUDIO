@@ -278,7 +278,7 @@ async function main(){
     assert.equal(login.user.id,id,'Recovered identity changed');
     assert.equal((await ok(fresh.from('profiles').select('role').eq('id',id).single(),'Recovered profile read')).role,role);
     assert.equal((await ok(fresh.from('clients').select('id').eq('id',cid),'Recovered client scope')).length,1);
-    await fresh.auth.signOut();
+    await fresh.auth.signOut({scope:'local'});
   }
   console.log('PASS: synthetic coach/client original passwords, roles and scoped REST access work after local credential replay');
   console.log('PASS: isolated recovery rehearsal; real-user password login and complete provider configuration parity remain unverified');
@@ -311,11 +311,18 @@ async function main(){
     });
     return {status:response.status,body:await response.json().catch(()=>({}))};
   };
+  // The recovery check signed out fresh sessions. GoTrue defaults to global
+  // sign-out; reacquire both synthetic sessions before testing authorization.
+  await ok(coachApi.auth.signInWithPassword({email:coachEmail,password}),'Coach deletion test login');
+  await ok(memberApi.auth.signInWithPassword({email:memberEmail,password}),'Member deletion test login');
+  assert.equal((await ok(memberApi.auth.getUser(),'Member identity')).user.id,memberUid);
+  assert.equal((await ok(memberApi.from('profiles').select('role').eq('id',memberUid).single(),'Member role')).role,'client');
   const requestBody={clientId:cid,confirm:true,confirmName:'Recovery canary'};
   const direct=await coachApi.from('clients').delete().eq('id',cid).select('id');
   assert(direct.error,'Direct authenticated client deletion must be denied');
   assert.equal((await request(otherApi,requestBody)).status,403,'Foreign coach deletion must be denied');
-  assert.equal((await request(memberApi,requestBody)).status,403,'Member deletion must be denied');
+  const memberDenied=await request(memberApi,requestBody);
+  assert.equal(memberDenied.status,403,'Member deletion must be denied; HTTP '+memberDenied.status);
   assert.equal((await request(coachApi,{...requestBody,confirmName:'wrong'})).status,400,'Wrong name must be denied');
   const hold=crypto.randomUUID();
   const acquired=await ok(client.rpc('pf_deletion_lease_acquire',{p_client_id:cid,p_coach_id:coachUid,p_lease_id:hold}),'Synthetic deletion lease');
