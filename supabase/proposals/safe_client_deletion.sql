@@ -205,3 +205,33 @@ as $$
 $$;
 revoke all on function public.pf_deletion_lease_release(text, uuid) from public, anon, authenticated;
 grant execute on function public.pf_deletion_lease_release(text, uuid) to service_role;
+
+-- Safe deletion must be the ONLY path for deleting a cloud client. The caller
+-- has already been authenticated by the Edge Function; the DB checks role,
+-- ownership, durable stage and unexpired lease again in the same transaction.
+create or replace function public.pf_delete_client_row_with_lease(
+  p_client_id text, p_coach_id uuid, p_lease_id uuid
+) returns boolean
+language plpgsql security definer set search_path = ''
+as $$
+declare v_deleted integer;
+begin
+  if not exists (
+    select 1 from private.client_deletion_leases l
+    join private.client_deletion_jobs j on j.client_id=l.client_id
+    join public.profiles p on p.id=j.coach_id
+    where l.client_id=p_client_id and l.lease_id=p_lease_id
+      and l.expires_at>pg_catalog.clock_timestamp()
+      and j.coach_id=p_coach_id and j.status='auth_disabled'
+      and p.role='coach'
+  ) then
+    raise exception 'Deletion lease or ownership invalid' using errcode='42501';
+  end if;
+  delete from public.clients where id=p_client_id and coach_id=p_coach_id;
+  get diagnostics v_deleted = row_count;
+  return v_deleted=1;
+end;
+$$;
+revoke all on function public.pf_delete_client_row_with_lease(text,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.pf_delete_client_row_with_lease(text,uuid,uuid) to service_role;
+revoke delete on public.clients from public,anon,authenticated;

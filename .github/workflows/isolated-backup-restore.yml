@@ -100,6 +100,20 @@ jobs:
             'PF_RESTORE_DB_URL='+db+'\nPF_RESTORE_API_URL='+api+'\nPF_RESTORE_LOCAL_SERVICE_KEY='+key+'\nPF_RESTORE_LOCAL_ANON_KEY='+anon+'\n');
           console.log('PASS: all restore endpoints pinned to disposable local Supabase');
           JS
+      - name: Start deletion Edge Function exclusively in disposable Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PF_ISOLATED_DIR" = "$RUNNER_TEMP/pf-restore-local"
+          mkdir -p "$PF_ISOLATED_DIR/supabase/functions"
+          cp -R supabase/functions/delete-client "$PF_ISOLATED_DIR/supabase/functions/"
+          cp -R supabase/functions/_shared "$PF_ISOLATED_DIR/supabase/functions/"
+          cd "$PF_ISOLATED_DIR"
+          # Do not pass backup or provider credentials into the Edge Function.
+          env -u BACKUP_GDRIVE_CLIENT_ID -u BACKUP_GDRIVE_CLIENT_SECRET -u BACKUP_GDRIVE_REFRESH_TOKEN -u BACKUP_ENCRYPTION_KEY -u BACKUP_GDRIVE_FOLDER_ID supabase functions serve delete-client > "$RUNNER_TEMP/pf-delete-edge.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/pf-delete-edge.pid"
+          sleep 5
+          kill -0 "$(cat "$RUNNER_TEMP/pf-delete-edge.pid")"
       - name: Restore real encrypted backup into disposable local Supabase
         shell: bash
         run: |

@@ -216,6 +216,11 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
 
           // 1) deletions first (frees the one-workout-per-day slot for replacements)
           if (isCoach) {
+            // A client may disappear only through the confirmed server deletion path.
+            // Refuse before deleting any dependent workouts from a stale local snapshot.
+            if ([...pushedClients.current.keys()].some(id => !liveClientIds.has(id))) {
+              throw { code: '42501', message: 'Use safe server-side client deletion or Archive.' };
+            }
             const goneWorkouts = [...pushedWorkouts.current.keys()].filter((id) => !liveWorkouts.has(id));
             for (const id of goneWorkouts) {
               const version = workoutVersions.current.get(id);
@@ -225,15 +230,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
               if (!data?.length) throw { code: '40001', message: 'Workout changed before deletion' };
               pushedWorkouts.current.delete(id); workoutVersions.current.delete(id);
             }
-            const goneClients = [...pushedClients.current.keys()].filter((id) => !liveClientIds.has(id));
-            for (const id of goneClients) {
-              const version = clientVersions.current.get(id);
-              if (!version) throw new Error('Missing profile version');
-              const { data, error } = await supabase!.from('clients').delete().eq('id', id).eq('updated_at', version).select('id');
-              if (error) throw error;
-              if (!data?.length) throw { code: '40001', message: 'Profile changed before deletion' };
-              pushedClients.current.delete(id); clientVersions.current.delete(id);
-            }
+
           }
 
           // 2) client profiles that changed (before their workouts: foreign key)

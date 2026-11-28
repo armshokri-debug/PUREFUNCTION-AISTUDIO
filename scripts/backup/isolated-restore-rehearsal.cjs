@@ -282,6 +282,60 @@ async function main(){
   }
   console.log('PASS: synthetic coach/client original passwords, roles and scoped REST access work after local credential replay');
   console.log('PASS: isolated recovery rehearsal; real-user password login and complete provider configuration parity remain unverified');
+
+  // Only disposable local rows created above are eligible for the destructive
+  // acceptance check. Record counts before/after to protect every restored row.
+  assert(/^pf-restore-[a-f0-9]{32}$/.test(cid) && memberEmail.endsWith('@example.test'));
+  const expectedUsers=Number(q('select count(*) from auth.users'));
+  const expectedClients=Number(q('select count(*) from public.clients'));
+  const wid='pf-delete-workout-'+tag;
+  await ok(coachApi.from('workouts').insert({id:wid,client_id:cid,date:'2026-11-28',data:{name:'Deletion canary'}}),'Synthetic workout creation');
+  const objectPath=cid+'/qa-delete.txt';
+  await ok(client.storage.from('client-videos').upload(objectPath,Buffer.from('synthetic deletion file'),{contentType:'text/plain'}),'Synthetic media upload');
+  const proposal=path.resolve(__dirname,'../../supabase/proposals/safe_client_deletion.sql');
+  tool('psql',[db,'-X','-v','ON_ERROR_STOP=1','--single-transaction','-f',proposal]);
+  q("NOTIFY pgrst, 'reload schema'");
+  const otherEmail='pf-delete-other-'+tag+'@example.test';
+  q("insert into private.coach_allowlist(email) values ('"+otherEmail+"')");
+  const other=await ok(client.auth.admin.createUser({email:otherEmail,password,email_confirm:true}),'Synthetic unrelated coach creation');
+  const otherApi=makeClient();
+  await ok(otherApi.auth.signInWithPassword({email:otherEmail,password}),'Unrelated coach login');
+  const request=async (actor,body)=>{
+    const auth=await actor.auth.getSession();
+    const token=auth.data.session?.access_token;
+    assert(token,'Synthetic token unavailable');
+    const response=await fetch(new URL('/functions/v1/delete-client',api),{
+      method:'POST',headers:{Authorization:'Bearer '+token,apikey:localAnonKey,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    return {status:response.status,body:await response.json().catch(()=>({}))};
+  };
+  const requestBody={clientId:cid,confirm:true,confirmName:'Recovery canary'};
+  const direct=await coachApi.from('clients').delete().eq('id',cid).select('id');
+  assert(direct.error,'Direct authenticated client deletion must be denied');
+  assert.equal((await request(otherApi,requestBody)).status,403,'Foreign coach deletion must be denied');
+  assert.equal((await request(memberApi,requestBody)).status,403,'Member deletion must be denied');
+  assert.equal((await request(coachApi,{...requestBody,confirmName:'wrong'})).status,400,'Wrong name must be denied');
+  const hold=crypto.randomUUID();
+  const acquired=await ok(client.rpc('pf_deletion_lease_acquire',{p_client_id:cid,p_coach_id:coachUid,p_lease_id:hold}),'Synthetic deletion lease');
+  assert.equal(acquired,'acquired');
+  assert.equal((await request(coachApi,requestBody)).status,409,'Concurrent deletion must be blocked');
+  await ok(client.rpc('pf_deletion_lease_release',{p_client_id:cid,p_lease_id:hold}),'Synthetic lease release');
+  const removed=await request(coachApi,requestBody);
+  assert.equal(removed.status,200,'Synthetic deletion Edge status: '+removed.status+' stage '+String(removed.body?.stage||'unknown'));
+  assert.equal(removed.body?.status,'completed');
+  assert.equal(Number(q("select count(*) from public.clients where id='"+cid+"'")),0);
+  assert.equal(Number(q("select count(*) from public.workouts where id='"+wid+"'")),0);
+  assert.equal(Number(q("select count(*) from auth.users where id='"+memberUid+"'")),0);
+  assert.equal(Number(q("select count(*) from public.profiles where id='"+memberUid+"'")),0);
+  assert.equal(Number(q("select count(*) from storage.objects where bucket_id='client-videos' and name='"+objectPath+"'")),0);
+  assert.equal(Number(q('select count(*) from auth.users')),expectedUsers,'Unexpected account count after synthetic deletion');
+  assert.equal(Number(q('select count(*) from public.clients')),expectedClients-1,'Unexpected client count after synthetic deletion');
+  assert((await makeClient().auth.signInWithPassword({email:memberEmail,password})).error,'Deleted synthetic account can still sign in');
+  const again=await request(coachApi,requestBody);
+  assert.equal(again.status,200);
+  assert.equal(again.body?.alreadyCompleted,true);
+  console.log('PASS: real local deletion Edge, ownership, confirmation, lease conflict, client/workout/Auth/profile/media cleanup and idempotent retry; all archived rows preserved');
 }
 main().catch(err=>{
   // Never emit underlying database errors, object contents, passwords or keys.

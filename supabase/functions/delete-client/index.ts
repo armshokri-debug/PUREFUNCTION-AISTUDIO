@@ -157,14 +157,11 @@ Deno.serve(async (req) => {
       }
       return { error };
     },
-    deleteOwnedClientRow: async (token, clientId) => {
-      const caller = callerClient(token);
-      const { data, error } = await caller
-        .from('clients')
-        .delete()
-        .eq('id', clientId)
-        .select('id');
-      return { deleted: !error && Array.isArray(data) && data.length === 1, error };
+    deleteOwnedClientRow: async (_token, clientId, coachId, leaseId) => {
+      const { data, error } = await admin.rpc('pf_delete_client_row_with_lease', {
+        p_client_id: clientId, p_coach_id: coachId, p_lease_id: leaseId
+      });
+      return { deleted: !error && data === true, error };
     },
     deleteAuthUser: async (uid) => {
       const { error } = await admin.auth.admin.deleteUser(uid);

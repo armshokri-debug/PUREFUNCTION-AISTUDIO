@@ -72,7 +72,9 @@ export interface DeleteClientDeps {
   setAuthUserBanned: (uid: string, banned: boolean) => Promise<{ error: unknown }>;
   deleteOwnedClientRow: (
     token: string,
-    clientId: string
+    clientId: string,
+    coachId: string,
+    leaseId: string
   ) => Promise<{ deleted: boolean; error: unknown }>;
   /** Permanent Auth deletion — invoked ONLY after the client DB row is deleted. */
   deleteAuthUser: (uid: string) => Promise<{ error: unknown }>;
@@ -161,7 +163,7 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
   }
 
   try {
-    return await runDeletion(clientId, uid, token, body.confirmName, deps);
+    return await runDeletion(clientId, uid, token, body.confirmName, deps, leaseId);
   } finally {
     // A lost release response must not turn a confirmed deletion into a failure.
     // The database lease expires if the worker is interrupted.
@@ -170,7 +172,7 @@ export async function handleDeleteClient(req: Request, deps: DeleteClientDeps): 
 }
 
 async function runDeletion(
-  clientId: string, uid: string, token: string, confirmName: unknown, deps: DeleteClientDeps
+  clientId: string, uid: string, token: string, confirmName: unknown, deps: DeleteClientDeps, leaseId: string
 ): Promise<Response> {
   // Check durable deletion tracking first (fail closed if tracking store is unavailable).
   const existingJobRes = await deps.getDeletionJob(clientId);
@@ -325,7 +327,7 @@ async function runDeletion(
   // Stage 2: Atomic DB cascade delete via caller's JWT (RLS-enforced).
   // Auth is NOT permanently deleted yet; if DB deletion fails, Auth lock is reversed.
   if (job.status === 'auth_disabled') {
-    const deletedRow = await deps.deleteOwnedClientRow(token, job.clientId);
+    const deletedRow = await deps.deleteOwnedClientRow(token, job.clientId, uid, leaseId);
     let dbGone = !deletedRow.error && deletedRow.deleted;
 
     if (!dbGone) {
