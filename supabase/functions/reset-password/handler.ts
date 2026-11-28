@@ -17,6 +17,7 @@ export interface ResetPasswordDeps {
   generateRecoveryLink: (email: string) => Promise<{ hashedToken?: string; error?: unknown }>;
   sendEmail: (to: string, subject: string, html: string, options?: SendEmailOptions) => Promise<SendResult>;
   cooldown?: CooldownTracker;
+  reserveAttempt?: (subject: string) => Promise<boolean>;
   now?: () => number;
   logWarn?: (line: string) => void;
   logInfo?: (line: string) => void;
@@ -45,6 +46,7 @@ export async function handleResetPassword(req: Request, deps: ResetPasswordDeps)
   }
 
   try {
+    if (deps.reserveAttempt && !(await deps.reserveAttempt(emailCooldownKey(addr)))) return json(200, { ok: true });
     // Existing users may have registered with googlemail.com instead of gmail.com.
     // Generate a link for the stored address, not a new or guessed identity.
     let recipient = addr;

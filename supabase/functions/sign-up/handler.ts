@@ -7,10 +7,11 @@ import {
   type SendEmailOptions,
   type SendResult
 } from '../_shared/email-core.ts';
-import { alternateGoogleMailDomain } from '../_shared/google-email-alias.ts';
+import { alternateGoogleMailDomain, emailCooldownKey } from '../_shared/google-email-alias.ts';
 
 export interface SignUpDeps {
   appUrl: string;
+  reserveAttempt?: (subject: string) => Promise<boolean>;
   reserveSignupVerification: (email: string) => Promise<{ data: unknown; error: unknown }>;
   getSignupRole: (email: string) => Promise<{ data: unknown; error: unknown }>;
   isExistingSignupAccount: (email: string) => Promise<{ data: unknown; error: unknown }>;
@@ -55,6 +56,12 @@ export async function handleSignUp(req: Request, deps: SignUpDeps): Promise<Resp
 
   // Identical response for unknown, confirmed and unconfirmed addresses: no enumeration.
   const generic = () => json(200, { ok: true, verificationRequired: true });
+
+  if (deps.reserveAttempt) {
+    try {
+      if (!(await deps.reserveAttempt(emailCooldownKey(email)))) return generic();
+    } catch { return generic(); }
+  }
 
   const sendLink = async (recipient: string, token: string, type: 'signup' | 'magiclink') => {
     const link = new URL(deps.appUrl);

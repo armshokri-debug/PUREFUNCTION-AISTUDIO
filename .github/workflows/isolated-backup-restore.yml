@@ -25,7 +25,9 @@ jobs:
       github.repository == 'armshokri-debug/PUREFUNCTION-AISTUDIO' &&
       (github.event_name == 'pull_request' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
-        github.head_ref == 'safety/backup-restore-acceptance-20261124') ||
+        (github.head_ref == 'safety/backup-restore-acceptance-20261124' ||
+         github.head_ref == 'safety/deletion-recovery-hardening-20261128' ||
+         github.head_ref == 'safety/integrated-release-20261128')) ||
       (github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
         github.event.inputs.reviewed_sha == github.sha)
@@ -33,7 +35,7 @@ jobs:
     timeout-minutes: 45
     env:
       PF_ISOLATED_RESTORE: I_CONFIRM_DISPOSABLE_LOCAL_ONLY
-      BACKUP_ARCHIVE_NAME: ${{ inputs.archive_name || 'backup-2026-11-23T22-29-25Z.tar.gz.enc' }}
+      BACKUP_ARCHIVE_NAME: ${{ inputs.archive_name || 'backup-2026-11-27T12-08-30Z.tar.gz.enc' }}
       BACKUP_GDRIVE_CLIENT_ID: ${{ secrets.BACKUP_GDRIVE_CLIENT_ID }}
       BACKUP_GDRIVE_CLIENT_SECRET: ${{ secrets.BACKUP_GDRIVE_CLIENT_SECRET }}
       BACKUP_GDRIVE_REFRESH_TOKEN: ${{ secrets.BACKUP_GDRIVE_REFRESH_TOKEN }}
@@ -89,15 +91,30 @@ jobs:
           const v=(...k)=>k.map(x=>s[x]).find(x=>typeof x==='string'&&x.length);
           const db=v('DB_URL','db_url'),api=v('API_URL','api_url');
           const key=v('SERVICE_ROLE_KEY','service_role_key','SECRET_KEY','secret_key');
+          const anon=v('ANON_KEY','anon_key','PUBLISHABLE_KEY','publishable_key');
           for(const url of [db,api]) {
             if (!url || !['localhost','127.0.0.1'].includes(new URL(url).hostname))
               throw Error('BLOCKED: Supabase is not local');
           }
-          if(!key) throw Error('Missing disposable local Storage key');
+          if(!key || !anon) throw Error('Missing disposable local API keys');
           fs.appendFileSync(process.env.GITHUB_ENV,
-            'PF_RESTORE_DB_URL='+db+'\nPF_RESTORE_API_URL='+api+'\nPF_RESTORE_LOCAL_SERVICE_KEY='+key+'\n');
+            'PF_RESTORE_DB_URL='+db+'\nPF_RESTORE_API_URL='+api+'\nPF_RESTORE_LOCAL_SERVICE_KEY='+key+'\nPF_RESTORE_LOCAL_ANON_KEY='+anon+'\n');
           console.log('PASS: all restore endpoints pinned to disposable local Supabase');
           JS
+      - name: Start deletion Edge Function exclusively in disposable Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PF_ISOLATED_DIR" = "$RUNNER_TEMP/pf-restore-local"
+          mkdir -p "$PF_ISOLATED_DIR/supabase/functions"
+          cp -R supabase/functions/delete-client "$PF_ISOLATED_DIR/supabase/functions/"
+          cp -R supabase/functions/_shared "$PF_ISOLATED_DIR/supabase/functions/"
+          cd "$PF_ISOLATED_DIR"
+          # Do not pass backup or provider credentials into the Edge Function.
+          env -u BACKUP_GDRIVE_CLIENT_ID -u BACKUP_GDRIVE_CLIENT_SECRET -u BACKUP_GDRIVE_REFRESH_TOKEN -u BACKUP_ENCRYPTION_KEY -u BACKUP_GDRIVE_FOLDER_ID supabase functions serve delete-client > "$RUNNER_TEMP/pf-delete-edge.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/pf-delete-edge.pid"
+          sleep 5
+          kill -0 "$(cat "$RUNNER_TEMP/pf-delete-edge.pid")"
       - name: Restore real encrypted backup into disposable local Supabase
         shell: bash
         run: |

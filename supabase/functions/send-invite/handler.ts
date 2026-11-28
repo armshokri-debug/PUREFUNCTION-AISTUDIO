@@ -30,6 +30,7 @@ export interface SendInviteDeps {
   deleteNewUser: (id: string) => Promise<void>;
   sendEmail: (to: string, subject: string, html: string, options?: SendEmailOptions) => Promise<SendResult>;
   cooldown?: CooldownTracker;
+  reserveAttempt?: (subject: string) => Promise<boolean>;
   now?: () => number;
 }
 
@@ -69,6 +70,12 @@ export async function handleSendInvite(req: Request, deps: SendInviteDeps): Prom
   const cooldownKey = `${uid}:${client.id}:${emailCooldownKey(clientEmail)}`;
   if (deps.cooldown?.isActive(cooldownKey, INVITE_COOLDOWN_MS, now)) {
     return json(429, { error: 'An invite was just sent. Wait a minute before sending again.' });
+  }
+
+  if (deps.reserveAttempt) {
+    try {
+      if (!(await deps.reserveAttempt(emailCooldownKey(clientEmail)))) return json(429, { error: 'Invitation limit reached. Wait before trying again.' });
+    } catch { return json(503, { error: 'Invitation temporarily unavailable.' }); }
   }
 
   // Fail closed on lookup errors; never create a second user for the other Gmail spelling.

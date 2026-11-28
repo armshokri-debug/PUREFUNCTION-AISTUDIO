@@ -8,6 +8,7 @@ import { stableStringify, supabase } from './supabase';
 import type { Profile } from './Session';
 import { workoutResults } from './workoutResults';
 import { isVersionConflictCode } from './versionConflict';
+import { syncRetryDelay } from './syncRetry';
 
 export type SyncState = 'saved' | 'saving' | 'error' | 'offline';
 
@@ -95,6 +96,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
   const workoutVersions = useRef(new Map<string, string>());
   const mounted = useRef(true);
   const blocked = useRef(false);
+  const retryAttempts = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (timer.current) window.clearTimeout(timer.current); }; }, []);
   const timer = useRef<number | null>(null);
   const flushing = useRef(false);
@@ -167,6 +169,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
         })
         .sort((a, b) => a.name.localeCompare(b.name));
       blocked.current = false;
+      retryAttempts.current = 0;
       current.current = list;
       setState(list);
       setLoadError(null);
@@ -186,6 +189,10 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
       timer.current = null;
     }
     if (!supabase || !profile || !mounted.current || blocked.current || loadedFor.current !== profile.id) return false;
+    if (navigator.onLine === false) {
+      if (hasPendingChanges(current.current)) setSync('offline');
+      return !hasPendingChanges(current.current);
+    }
     if (inflightFlush.current) {
       again.current = true;
       return inflightFlush.current;
@@ -197,6 +204,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
       setSync('saving');
       let failed = false;
       let conflict = false;
+      let retryDelay: number | null = null;
       try {
         do {
           again.current = false;
@@ -216,6 +224,10 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
 
           // 1) deletions first (frees the one-workout-per-day slot for replacements)
           if (isCoach) {
+            // Cloud clients may disappear only through the confirmed server deletion path.
+            if ([...pushedClients.current.keys()].some(id => !liveClientIds.has(id))) {
+              throw { code: '42501', message: 'Use safe server-side client deletion or Archive.' };
+            }
             const goneWorkouts = [...pushedWorkouts.current.keys()].filter((id) => !liveWorkouts.has(id));
             for (const id of goneWorkouts) {
               const version = workoutVersions.current.get(id);
@@ -225,15 +237,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
               if (!data?.length) throw { code: '40001', message: 'Workout changed before deletion' };
               pushedWorkouts.current.delete(id); workoutVersions.current.delete(id);
             }
-            const goneClients = [...pushedClients.current.keys()].filter((id) => !liveClientIds.has(id));
-            for (const id of goneClients) {
-              const version = clientVersions.current.get(id);
-              if (!version) throw new Error('Missing profile version');
-              const { data, error } = await supabase!.from('clients').delete().eq('id', id).eq('updated_at', version).select('id');
-              if (error) throw error;
-              if (!data?.length) throw { code: '40001', message: 'Profile changed before deletion' };
-              pushedClients.current.delete(id); clientVersions.current.delete(id);
-            }
+
           }
 
           // 2) client profiles that changed (before their workouts: foreign key)
@@ -295,6 +299,7 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
       } catch (e) {
         failed = true;
         conflict = (isVersionConflictCode((e as { code?: string }).code) || ['42501', '23505', '23503'].includes((e as { code?: string }).code ?? ''));
+        if (!conflict) retryDelay = syncRetryDelay(e, retryAttempts.current);
         if (conflict) blocked.current = true;
         if (conflict) setLoadError('Your changes could not be saved safely. Reload to fetch the latest data before editing again.');
       } finally {
@@ -305,10 +310,13 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
       again.current = false;
       if (failed) {
         setSync(navigator.onLine === false ? 'offline' : 'error');
-        // try again shortly (network blips, token refresh)
-        if (!conflict && !timer.current) timer.current = window.setTimeout(() => void flushRef.current(), 5000);
+        if (navigator.onLine !== false && !conflict && retryDelay !== null && !timer.current) {
+          retryAttempts.current += 1;
+          timer.current = window.setTimeout(() => void flushRef.current(), retryDelay);
+        }
         return false;
       }
+      retryAttempts.current = 0;
       const pending = hasPendingChanges(current.current) || timer.current !== null;
       setSync(pending ? 'saving' : 'saved');
       if (pending && !timer.current) {
@@ -333,8 +341,11 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
         setSync('error');
         return;
       }
+      retryAttempts.current = 0;
+      if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
+      if (navigator.onLine === false) { setSync('offline'); return; }
       setSync('saving');
-      if (timer.current) window.clearTimeout(timer.current);
+      if (inflightFlush.current) again.current = true;
       timer.current = window.setTimeout(() => void flushRef.current(), 600);
     },
     []
@@ -355,16 +366,23 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
 
   // save before the tab closes, and warn if unsaved edits haven't synced yet
   useEffect(() => {
+    const shouldAutoFlush = () => !blocked.current && retryAttempts.current < 4 && hasPendingChanges(current.current);
     const onHide = () => {
-      if (document.visibilityState === 'hidden') void flush();
+      if (document.visibilityState === 'hidden' && shouldAutoFlush()) void flush();
     };
     const onPageHide = () => {
-      void flush();
+      if (shouldAutoFlush()) void flush();
     };
-    const onOnline = () => void flush();
+    const onOnline = () => {
+      retryAttempts.current = 0;
+      if (!blocked.current && hasPendingChanges(current.current)) void flush();
+    };
+    const onOffline = () => {
+      if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
+      if (hasPendingChanges(current.current)) setSync('offline');
+    };
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (
-        !blocked.current &&
         loadedFor.current === profile?.id &&
         (hasPendingChanges(current.current) || inflightFlush.current !== null || timer.current !== null)
       ) {
@@ -375,11 +393,13 @@ export function useCloudClientsStore(profile: Profile | null): ClientsStore {
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       window.removeEventListener('beforeunload', onBeforeUnload);
     };
   }, [flush, hasPendingChanges, profile?.id]);
