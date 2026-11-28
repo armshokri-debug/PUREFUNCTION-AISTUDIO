@@ -4,9 +4,9 @@ import { analyzeLocalFood, searchLocalFoods } from '../localNutrition';
 
 describe('bundled local nutrition reference', () => {
   it('retains the source counts and unique food identifiers', () => {
-    expect(FOOD_CATALOG).toHaveLength(461);
+    expect(FOOD_CATALOG).toHaveLength(1061);
     expect(FOOD_CATALOG.reduce((n,row)=>n+row[9].length,0)).toBe(1335);
-    expect(new Set(FOOD_CATALOG.map(row=>row[0])).size).toBe(461);
+    expect(new Set(FOOD_CATALOG.map(row=>row[0])).size).toBe(1061);
   });
   it('calculates two cooked foods using their actual USDA reference values', () => {
     const result=analyzeLocalFood('150g cooked chicken breast and 100g cooked rice');
@@ -112,4 +112,10 @@ describe('reference integrity and safe matching', () => {
     expect(analyzeLocalFood('100g fdc:'+FOOD_CATALOG.find(r=>r[0]==='cod')![2]).items[0].state).toBe('cooked');
     expect(analyzeLocalFood('۱۰۰ گرم عدس پخته').items[0].kcal).toBe(116);
   });
+});
+it('requires explicit selection for expanded records and preserves exact source identity', () => {
+  const row=FOOD_CATALOG.find(r=>r[0]==='fdc-167512')!;
+  expect(row).toBeDefined();
+  expect(analyzeLocalFood('100 g '+row[1]).items.every(i=>i.sourceId!==row[2])).toBe(true);
+  expect(analyzeLocalFood('100 g fdc:'+row[2]).items[0]).toMatchObject({sourceId:row[2],kcal:307});
 });
