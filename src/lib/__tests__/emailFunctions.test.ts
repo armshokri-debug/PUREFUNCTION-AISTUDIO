@@ -429,6 +429,26 @@ describe('Route 2: sign-up (registration & email verification)', () => {
 });
 
 describe('Route 3: reset-password (password recovery)', () => {
+  it.each([
+    ['https://purefunction-live.pages.dev/', 'https://armshokri-debug.github.io', 'https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/'],
+    ['https://purefunction-live.pages.dev/', 'https://purefunction-live.pages.dev', 'https://purefunction-live.pages.dev/'],
+    ['https://purefunction-live.pages.dev/', 'https://attacker.example', 'https://purefunction-live.pages.dev/'],
+    ['https://purefunction-live.pages.dev/', 'https://armshokri-debug.github.io.attacker.example', 'https://purefunction-live.pages.dev/'],
+    ['https://purefunction-live.pages.dev/', '', 'https://purefunction-live.pages.dev/'],
+    ['https://purefunction-qa.pages.dev/', 'https://armshokri-debug.github.io', 'https://purefunction-qa.pages.dev/'],
+    ['https://armshokri-debug.github.io/PUREFUNCTION-AISTUDIO/', 'https://purefunction-live.pages.dev', 'https://purefunction-live.pages.dev/']
+  ])('uses only trusted recovery destinations (%s, %s)', async (appUrl, origin, expected) => {
+    const sendEmail = vi.fn<SendEmailFn>(async () => ({ ok: true }));
+    const response = await handleResetPassword(
+      postJson('https://fn.local/reset-password', { email: 'member@example.invalid', redirectTo: 'https://attacker.example' }, origin ? { Origin: origin } : {}),
+      { appUrl, generateRecoveryLink: async () => ({ hashedToken: 'synthetic-recovery-token' }), sendEmail, logInfo: vi.fn() }
+    );
+    expect(response.status).toBe(200);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendEmail.mock.calls[0][2]).toContain(expected + '?reset=synthetic-recovery-token');
+    expect(sendEmail.mock.calls[0][2]).not.toContain('attacker.example');
+  });
+
   it('sends recovery link to active app URL, hides existence, logs no PII, and applies duplicate cooldown', async () => {
     let clock = 2_000_000;
     const sendEmail = vi.fn<SendEmailFn>(async () => ({ ok: true }));
