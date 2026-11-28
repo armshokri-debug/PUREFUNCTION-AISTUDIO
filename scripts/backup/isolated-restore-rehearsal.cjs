@@ -24,12 +24,13 @@ assert.equal(process.env.PF_ISOLATED_RESTORE, 'I_CONFIRM_DISPOSABLE_LOCAL_ONLY',
 const db = process.env.PF_RESTORE_DB_URL;
 const api = process.env.PF_RESTORE_API_URL;
 const localServiceKey = process.env.PF_RESTORE_LOCAL_SERVICE_KEY;
+const localAnonKey = process.env.PF_RESTORE_LOCAL_ANON_KEY;
 for(const url of [db,api]) {
   assert(url, 'Missing local Supabase endpoint');
   const u = new URL(url);
   assert(['localhost','127.0.0.1'].includes(u.hostname), 'Blocked: remote endpoint');
 }
-assert(localServiceKey,'Missing disposable-local service key');
+assert(localServiceKey && localAnonKey,'Missing disposable-local API keys');
 const folderId=process.env.BACKUP_GDRIVE_FOLDER_ID;
 assert(/^[\w-]{10,120}$/.test(folderId||''),'Missing pinned backup folder');
 process.umask(0o077);
@@ -45,9 +46,9 @@ function tool(name,args) {
   });
 }
 const q = s=>tool('psql',[db,'-X','-v','ON_ERROR_STOP=1','-A','-t','-c',s]).trim();
-function pgRestore(file,mode, extra=[]) {
+function pgRestore(file,mode, extra=[], restoreAcl=false) {
   try{
-    tool('pg_restore',['--dbname',db,'--no-owner','--no-privileges',
+    tool('pg_restore',['--dbname',db,'--no-owner',...(restoreAcl?[]:['--no-privileges']),
       '--exit-on-error',...mode,...extra,file]);
   } catch (err) {
     // pg_restore errors can include statements and row data. Print only a
@@ -61,6 +62,29 @@ function pgRestore(file,mode, extra=[]) {
     const tableNote=sourceTable?' [table: '+sourceTable+']':'';
     throw Error('Local restore failed for '+path.basename(file)+tableNote+(safe?' / '+safe:''));
   }
+}
+// Provider-owned default grants and objects require their owner or a local
+// database administrator. Never grant the hosted postgres role membership in
+// supabase_admin. Only the disposable runner's exact Docker DB is permitted.
+function restoreLocalAdmin(file,tocFile,restoreAcl=false) {
+  const container='supabase_db_pf-restore-local';
+  assert.equal(tool('docker',['inspect','--format','{{.Name}}',container]).trim(),'/'+container,
+    'Blocked: expected disposable database container not found');
+  const port=new URL(db).port || '5432';
+  const published=tool('docker',['port',container,'5432/tcp']).trim().split('\n');
+  assert(published.some(line=>line.endsWith(':'+port)),'Blocked: local database port does not match container');
+  const args=['exec','-i',container,'psql','-X','-w','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1'];
+  const identity=tool('docker',[...args,'-Atc',"select current_user || ':' || current_database()"]).trim();
+  assert.equal(identity,'supabase_admin:postgres','Blocked: local admin identity mismatch');
+  const sqlFile=path.join(tmp,'local-admin-'+path.basename(tocFile)+'.sql');
+  try {
+    tool('pg_restore',['--no-owner',...(restoreAcl?[]:['--no-privileges']),'--use-list',tocFile,'--file',sqlFile,file]);
+    execFileSync('docker',[...args,'--single-transaction','-f','-'],{
+      input:fs.readFileSync(sqlFile),stdio:['pipe','pipe','pipe'],timeout:180000,maxBuffer:5*1024*1024
+    });
+  } catch {
+    throw Error('Disposable local administrative restore failed for '+path.basename(tocFile));
+  } finally { fs.rmSync(sqlFile,{force:true}); }
 }
 async function fileFromDrive(token,name,output) {
   const u=new URL('https://www.googleapis.com/drive/v3/files');
@@ -155,7 +179,45 @@ async function main(){
   restoreDataTables(auth,'auth',['users','identities','sessions','refresh_tokens',
     'mfa_factors','mfa_challenges','mfa_amr_claims','one_time_tokens','flow_state']);
   pgRestore(pub,['--data-only','--disable-triggers']);
+  // A row-only restore is not a complete application recovery: constraints,
+  // indexes, triggers and RLS policies live in the post-data section.
+  pgRestore(pub,['--section=post-data']);
+  // Restore application ACLs explicitly without overwriting provider-managed Auth/Storage ACLs.
+  const appToc=tool('pg_restore',['--list',pub]).split('\n');
+  const aclList=appToc.filter(l=>/^\d+;\s+\d+\s+\d+\s+ACL\s/.test(l));
+  const defaultAclList=appToc.filter(l=>/^\d+;\s+\d+\s+\d+\s+DEFAULT ACL\s/.test(l));
+  assert(aclList.length>0,'Application grant entries are missing from archive');
+  assert(defaultAclList.length>0,'Archived default grant entries missing');
+  const aclFile=path.join(tmp,'app-acl.toc');
+  const defaultAclFile=path.join(tmp,'app-default-acl.toc');
+  fs.writeFileSync(aclFile,aclList.join('\n')+'\n',{mode:0o600});
+  fs.writeFileSync(defaultAclFile,defaultAclList.join('\n')+'\n',{mode:0o600});
+  pgRestore(pub,['--use-list',aclFile],[],true);
+  restoreLocalAdmin(pub,defaultAclFile,true);
+  console.log('PASS: archived default privileges replayed by verified disposable database administrator');
+  assert.equal(Number(q("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and not c.relrowsecurity")),0,
+    'Restored application tables must have RLS enabled');
+  assert(Number(q("select count(*) from pg_policies where schemaname='public'"))>0,'Application RLS policies missing');
+  assert(Number(q("select count(*) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='public' and c.contype='f'"))>0,'Application foreign keys missing');
+  console.log('PASS: application post-data, RLS policies, foreign keys and archived grant entries restored');
   restoreDataTables(storage,'storage',['buckets','objects']);
+  // Reattach only the archived application-specific cross-schema objects, not
+  // provider-managed schema definitions or migrations.
+  const hookList=tool('pg_restore',['--list',auth]).split('\n')
+    .filter(l=>/^\d+;\s+\d+\s+\d+\s+TRIGGER auth users on_auth_user_created\s/.test(l));
+  assert.equal(hookList.length,1,'Archived Auth profile-link trigger missing');
+  const hookFile=path.join(tmp,'auth-hook.toc');
+  fs.writeFileSync(hookFile,hookList.join('\n')+'\n',{mode:0o600});
+  restoreLocalAdmin(auth,hookFile);
+  const storagePolicyList=tool('pg_restore',['--list',storage]).split('\n')
+    .filter(l=>/^\d+;\s+\d+\s+\d+\s+POLICY storage objects (client videos scoped |exercise videos |inbody scoped |message media scoped )/.test(l));
+  assert.equal(storagePolicyList.length,14,'Archived Pure Function Storage policies incomplete');
+  const storagePolicyFile=path.join(tmp,'storage-policies.toc');
+  fs.writeFileSync(storagePolicyFile,storagePolicyList.join('\n')+'\n',{mode:0o600});
+  restoreLocalAdmin(storage,storagePolicyFile);
+  assert.equal(Number(q("select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname ~ '^(client videos scoped |exercise videos |inbody scoped |message media scoped )'")),14,'Restored Storage policies incomplete');
+  assert.equal(Number(q("select count(*) from pg_trigger where tgrelid='auth.users'::regclass and tgname='on_auth_user_created' and not tgisinternal")),1,'Auth profile-link trigger missing');
+  console.log('PASS: archived app-specific Storage policies and Auth profile-link trigger restored');
   // Reattach only the archived Storage bytes to disposable local object storage.
   const client=createClient(api,localServiceKey,{auth:{persistSession:false,autoRefreshToken:false}});
   for(const obj of inventory.objects){
@@ -176,7 +238,112 @@ async function main(){
   assert.equal(inventory.objectCount,manifest.storageSummary.objectCount);
   console.log('PASS: real Auth and application rows restored to disposable PostgreSQL');
   console.log('PASS: archived Storage objects restored and downloaded with matching SHA-256');
-  console.log('PASS: isolated restore acceptance; user data never leaves ephemeral runner');
+  // The original passwords are intentionally not available. Prove that Auth
+  // works on the restored environment by creating a synthetic coach and client,
+  // then snapshot/replay their password hashes locally and sign in again.
+  // Never send an email, alter the real source database, or emit credentials.
+  const crypto=require('node:crypto');
+  const tag=crypto.randomUUID().replace(/-/g,'');
+  const coachEmail='pf-restore-coach-'+tag+'@example.test';
+  const memberEmail='pf-restore-member-'+tag+'@example.test';
+  const cid='pf-restore-'+tag;
+  const password='SyntheticOnly!7_'+crypto.randomBytes(24).toString('hex');
+  const makeClient=()=>createClient(api,localAnonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+  const ok=async (promise,label)=>{const {data,error}=await promise;assert(!error,label+' failed');return data;};
+  q("insert into private.coach_allowlist(email) values ('"+coachEmail+"')");
+  const coach=await ok(client.auth.admin.createUser({email:coachEmail,password,email_confirm:true}),'Synthetic coach creation');
+  const coachUid=coach.user.id;
+  assert(/^[a-f0-9-]{36}$/.test(coachUid),'Invalid synthetic coach ID');
+  const coachApi=makeClient();
+  await ok(coachApi.auth.signInWithPassword({email:coachEmail,password}),'Synthetic coach login');
+  assert.equal((await ok(coachApi.from('profiles').select('role').eq('id',coachUid).single(),'Coach profile read')).role,'coach');
+  await ok(coachApi.from('clients').insert({id:cid,coach_id:coachUid,email:memberEmail,data:{name:'Recovery canary'}}),'Synthetic client record');
+  const member=await ok(client.auth.admin.createUser({email:memberEmail,password,email_confirm:true}),'Synthetic client Auth creation');
+  const memberUid=member.user.id;
+  assert(/^[a-f0-9-]{36}$/.test(memberUid),'Invalid synthetic member ID');
+  const memberApi=makeClient();
+  await ok(memberApi.auth.signInWithPassword({email:memberEmail,password}),'Synthetic client login');
+  assert.equal((await ok(memberApi.from('profiles').select('role,client_id').eq('id',memberUid).single(),'Client profile read')).client_id,cid);
+  // Snapshot ONLY these two synthetic password hashes into a local temporary
+  // table; overwrite ONLY synthetic hashes, then replay and authenticate.
+  // This tests real password hashing/recovery with no real-user password.
+  q("create table private.pf_restore_canary_"+tag+" as select id,encrypted_password from auth.users where id in ('"+coachUid+"','"+memberUid+"')");
+  assert.equal(Number(q("select count(*) from private.pf_restore_canary_"+tag+" where encrypted_password is not null and length(encrypted_password)>0")),2);
+  q("update auth.users set encrypted_password=null where id in ('"+coachUid+"','"+memberUid+"')");
+  q("update auth.users u set encrypted_password=c.encrypted_password from private.pf_restore_canary_"+tag+" c where u.id=c.id");
+  q("drop table private.pf_restore_canary_"+tag);
+  for(const [email,id,role] of [[coachEmail,coachUid,'coach'],[memberEmail,memberUid,'client']]){
+    const fresh=makeClient();
+    const login=await ok(fresh.auth.signInWithPassword({email,password}),'Recovered synthetic password login');
+    assert.equal(login.user.id,id,'Recovered identity changed');
+    assert.equal((await ok(fresh.from('profiles').select('role').eq('id',id).single(),'Recovered profile read')).role,role);
+    assert.equal((await ok(fresh.from('clients').select('id').eq('id',cid),'Recovered client scope')).length,1);
+    await fresh.auth.signOut({scope:'local'});
+  }
+  console.log('PASS: synthetic coach/client original passwords, roles and scoped REST access work after local credential replay');
+  console.log('PASS: isolated recovery rehearsal; real-user password login and complete provider configuration parity remain unverified');
+
+  // Only disposable local rows created above are eligible for the destructive
+  // acceptance check. Record counts before/after to protect every restored row.
+  assert(/^pf-restore-[a-f0-9]{32}$/.test(cid) && memberEmail.endsWith('@example.test'));
+  const expectedUsers=Number(q('select count(*) from auth.users'));
+  const expectedClients=Number(q('select count(*) from public.clients'));
+  const wid='pf-delete-workout-'+tag;
+  await ok(coachApi.from('workouts').insert({id:wid,client_id:cid,date:'2026-11-28',data:{name:'Deletion canary'}}),'Synthetic workout creation');
+  const objectPath=cid+'/qa-delete.mp4';
+  // Match the existing bucket MIME allowlist; never relax production Storage policy.
+  await ok(client.storage.from('client-videos').upload(objectPath,Buffer.from('synthetic deletion fixture'),{contentType:'video/mp4'}),'Synthetic media upload');
+  const proposal=path.resolve(__dirname,'../../supabase/proposals/safe_client_deletion.sql');
+  tool('psql',[db,'-X','-v','ON_ERROR_STOP=1','--single-transaction','-f',proposal]);
+  q("NOTIFY pgrst, 'reload schema'");
+  const otherEmail='pf-delete-other-'+tag+'@example.test';
+  q("insert into private.coach_allowlist(email) values ('"+otherEmail+"')");
+  const other=await ok(client.auth.admin.createUser({email:otherEmail,password,email_confirm:true}),'Synthetic unrelated coach creation');
+  const otherApi=makeClient();
+  await ok(otherApi.auth.signInWithPassword({email:otherEmail,password}),'Unrelated coach login');
+  const request=async (actor,body)=>{
+    const auth=await actor.auth.getSession();
+    const token=auth.data.session?.access_token;
+    assert(token,'Synthetic token unavailable');
+    const response=await fetch(new URL('/functions/v1/delete-client',api),{
+      method:'POST',headers:{Authorization:'Bearer '+token,apikey:localAnonKey,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    return {status:response.status,body:await response.json().catch(()=>({}))};
+  };
+  // The recovery check signed out fresh sessions. GoTrue defaults to global
+  // sign-out; reacquire both synthetic sessions before testing authorization.
+  await ok(coachApi.auth.signInWithPassword({email:coachEmail,password}),'Coach deletion test login');
+  await ok(memberApi.auth.signInWithPassword({email:memberEmail,password}),'Member deletion test login');
+  assert.equal((await ok(memberApi.auth.getUser(),'Member identity')).user.id,memberUid);
+  assert.equal((await ok(memberApi.from('profiles').select('role').eq('id',memberUid).single(),'Member role')).role,'client');
+  const requestBody={clientId:cid,confirm:true,confirmName:'Recovery canary'};
+  const direct=await coachApi.from('clients').delete().eq('id',cid).select('id');
+  assert(direct.error,'Direct authenticated client deletion must be denied');
+  assert.equal((await request(otherApi,requestBody)).status,403,'Foreign coach deletion must be denied');
+  const memberDenied=await request(memberApi,requestBody);
+  assert.equal(memberDenied.status,403,'Member deletion must be denied; HTTP '+memberDenied.status);
+  assert.equal((await request(coachApi,{...requestBody,confirmName:'wrong'})).status,400,'Wrong name must be denied');
+  const hold=crypto.randomUUID();
+  const acquired=await ok(client.rpc('pf_deletion_lease_acquire',{p_client_id:cid,p_coach_id:coachUid,p_lease_id:hold}),'Synthetic deletion lease');
+  assert.equal(acquired,'acquired');
+  assert.equal((await request(coachApi,requestBody)).status,409,'Concurrent deletion must be blocked');
+  await ok(client.rpc('pf_deletion_lease_release',{p_client_id:cid,p_lease_id:hold}),'Synthetic lease release');
+  const removed=await request(coachApi,requestBody);
+  assert.equal(removed.status,200,'Synthetic deletion Edge status: '+removed.status+' stage '+String(removed.body?.stage||'unknown'));
+  assert.equal(removed.body?.status,'completed');
+  assert.equal(Number(q("select count(*) from public.clients where id='"+cid+"'")),0);
+  assert.equal(Number(q("select count(*) from public.workouts where id='"+wid+"'")),0);
+  assert.equal(Number(q("select count(*) from auth.users where id='"+memberUid+"'")),0);
+  assert.equal(Number(q("select count(*) from public.profiles where id='"+memberUid+"'")),0);
+  assert.equal(Number(q("select count(*) from storage.objects where bucket_id='client-videos' and name='"+objectPath+"'")),0);
+  assert.equal(Number(q('select count(*) from auth.users')),expectedUsers,'Unexpected account count after synthetic deletion');
+  assert.equal(Number(q('select count(*) from public.clients')),expectedClients-1,'Unexpected client count after synthetic deletion');
+  assert((await makeClient().auth.signInWithPassword({email:memberEmail,password})).error,'Deleted synthetic account can still sign in');
+  const again=await request(coachApi,requestBody);
+  assert.equal(again.status,200);
+  assert.equal(again.body?.alreadyCompleted,true);
+  console.log('PASS: real local deletion Edge, ownership, confirmation, lease conflict, client/workout/Auth/profile/media cleanup and idempotent retry; all archived rows preserved');
 }
 main().catch(err=>{
   // Never emit underlying database errors, object contents, passwords or keys.
