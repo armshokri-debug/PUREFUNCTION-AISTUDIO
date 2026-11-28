@@ -290,8 +290,9 @@ async function main(){
   const expectedClients=Number(q('select count(*) from public.clients'));
   const wid='pf-delete-workout-'+tag;
   await ok(coachApi.from('workouts').insert({id:wid,client_id:cid,date:'2026-11-28',data:{name:'Deletion canary'}}),'Synthetic workout creation');
-  const objectPath=cid+'/qa-delete.txt';
-  await ok(client.storage.from('client-videos').upload(objectPath,Buffer.from('synthetic deletion file'),{contentType:'text/plain'}),'Synthetic media upload');
+  const objectPath=cid+'/qa-delete.mp4';
+  // Match the existing bucket MIME allowlist; never relax production Storage policy.
+  await ok(client.storage.from('client-videos').upload(objectPath,Buffer.from('synthetic deletion fixture'),{contentType:'video/mp4'}),'Synthetic media upload');
   const proposal=path.resolve(__dirname,'../../supabase/proposals/safe_client_deletion.sql');
   tool('psql',[db,'-X','-v','ON_ERROR_STOP=1','--single-transaction','-f',proposal]);
   q("NOTIFY pgrst, 'reload schema'");
