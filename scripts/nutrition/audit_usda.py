@@ -20,6 +20,12 @@ SOURCES = {
     "FoodData Central Foundation Foods 2026-04-30": ("foundation_food_json_2026-04-30", "FoundationFoods"),
 }
 BASE = "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_"
+# Pin the exact bytes observed in audit run 46147357852.
+SHA256 = {
+    "sr_legacy_food_json_2018-04": "0fe8ae486a2c8eb42cb96413f058deb51863a46c8fb8eeb4b1fb45006dd338ef",
+    "survey_food_json_2024-10-31": "dfb06ae7ddc397ccd570b91c14b75438ab2ba39f64f22d321f61d4a52a77f3eb",
+    "foundation_food_json_2026-04-30": "186e988ec542e913f51ef62b86a47758e8cdd0d1dc3889e7b055581f3c09c77a",
+}
 MAX_ZIP = 32 * 1024 * 1024
 MAX_JSON = 300 * 1024 * 1024
 
@@ -32,6 +38,8 @@ def download(suffix, key):
         blob = response.read(MAX_ZIP + 1)
     if len(blob) > MAX_ZIP:
         raise ValueError("USDA archive exceeded size limit")
+    if hashlib.sha256(blob).hexdigest() != SHA256[suffix]:
+        raise ValueError("Pinned official archive checksum changed: " + suffix)
     with zipfile.ZipFile(io.BytesIO(blob)) as archive:
         members = [i for i in archive.infolist() if i.filename.lower().endswith(".json")]
         if len(members) != 1 or members[0].file_size > MAX_JSON:
@@ -125,6 +133,12 @@ def main():
     if report["verified_foods"]!=len(rows) or report["portion_weight_unverified"]:
         raise SystemExit("Official reference audit requires review; no candidate is auto-published.")
     print("PASS: all catalog descriptions, four nutrients and portion weights matched. Portion label semantics require separate review.")
+    # Emit a bounded, deterministic set of expansion records for review and exact import.
+    # Prioritize basic SR Legacy ingredients over mixed survey dishes; exact descriptions only.
+    selected = [r for r in candidate if r[4] == "FoodData Central SR Legacy 2018-04"]
+    selected.sort(key=lambda r: int(r[2]))
+    for row in selected[:600]:
+        print("EXPANSION_ROW:", json.dumps(row, ensure_ascii=True, separators=(",", ":")))
 
 if __name__ == "__main__":
     main()
